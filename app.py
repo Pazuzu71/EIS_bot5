@@ -43,6 +43,15 @@ async def insert_event(db, row):
     await db.commit()
 
 
+async def not_exist_in_db(db, ftp_path: str, modify: str):
+    sql = """SELECT COUNT(*) FROM files WHERE ftppath = ? AND modify = ?"""
+
+    async with db.execute(sql, (ftp_path, modify)) as cursor:
+        res = await cursor.fetchone()
+        # print('Записей в базе ', res)
+        return not bool(res[0])
+
+
 async def get_data(ftp_path: str, modify: str):
     file = ftp_path.split('/')[-1]
     # client = aioftp.Client()
@@ -92,12 +101,15 @@ async def get_ftp_list():
         x = await client.list('/fcs_regions/Tulskaja_obl/contracts/currMonth', recursive=False)
     for path, info in x:
         print(path, info)
-        if info['size'] != '22':
-            # print(info)
-            links.append(
-                (str(path),
-                 datetime.strptime(info['modify'], '%Y%m%d%H%M%S').astimezone(pytz.timezone('Europe/Moscow')).isoformat(sep='T', timespec='auto'))
-            )
+        async with aiosqlite.connect('sqlite.db') as db:
+            print('Записей в базе нет:', await not_exist_in_db(db, str(path), info['modify']))
+
+            if info['size'] != '22' and await not_exist_in_db(db, str(path), info['modify']):
+                # print(info)
+                links.append(
+                    (str(path), info['modify'])
+                     # datetime.strptime(info['modify'], '%Y%m%d%H%M%S').astimezone(pytz.timezone('Europe/Moscow')).isoformat(sep='T', timespec='auto'))
+                )
 
             # links.append(str(path))
 
