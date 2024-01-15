@@ -4,7 +4,6 @@ import re
 import zipfile
 from datetime import datetime
 
-
 import aioftp
 import aiosqlite
 import pytz
@@ -12,55 +11,58 @@ import pytz
 
 host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
 links = []
-
-TABLE_FILES = '''create table if not exists files
-    (
-        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-        ftppath TEXT,
-        modify TEXT,
-        eisdocno TEXT,
-        eispublicationdate TEXT,
-        xmlname TEXT,
-        creationdate TEXT,
-        enddate TEXT
-    )'''
+folders = [
+    '/fcs_regions/Tulskaja_obl/contracts/currMonth',
+    # '/fcs_regions/Tulskaja_obl/contracts/prevMonth'
+]
 
 
-async def insert_event(db, row):
+async def create_tables():
+    async with aiosqlite.connect('sqlite.db') as db:
+        await db.executescript("""create table if not exists files
+            (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                ftppath TEXT,
+                modify TEXT,
+                eisdocno TEXT,
+                eispublicationdate TEXT,
+                xmlname TEXT,
+                creationdate TEXT,
+                enddate TEXT
+            )"""
+                               )
+        await db.commit()
+
+
+async def insert_event(row):
     """Insert a new event into the files table"""
-    sql = """INSERT INTO files 
-              (ftppath, modify, eisdocno, eispublicationdate, xmlname, creationdate)  
-              VALUES (?, ?, ?, ?, ?, ?)"""
+    async with aiosqlite.connect('sqlite.db') as db:
+        sql = """INSERT INTO files 
+                  (ftppath, modify, eisdocno, eispublicationdate, xmlname, creationdate)  
+                  VALUES (?, ?, ?, ?, ?, ?)"""
 
-    await db.execute(sql, (
-        row['ftp_path'],
-        row['modify'],
-        row['eisdocno'],
-        row['eispublicationdate'],
-        row['xmlname'],
-        datetime.now(pytz.timezone('Europe/Moscow')).isoformat(sep='T', timespec='auto')
-    ))
-    await db.commit()
+        await db.execute(sql,
+                         (
+                             row['ftp_path'],
+                             row['modify'],
+                             row['eisdocno'],
+                             row['eispublicationdate'],
+                             row['xmlname'],
+                             datetime.now(pytz.timezone('Europe/Moscow')).isoformat(sep='T', timespec='auto')
+                         ))
+        await db.commit()
 
 
-async def not_exist_in_db(db, ftp_path: str, modify: str):
-    sql = """SELECT COUNT(*) FROM files WHERE ftppath = ? AND modify = ?"""
-
-    async with db.execute(sql, (ftp_path, modify)) as cursor:
-        res = await cursor.fetchone()
-        # print('Записей в базе ', res)
-        return not bool(res[0])
+async def not_exist_in_db(ftp_path: str, modify: str):
+    async with aiosqlite.connect('sqlite.db') as db:
+        async with db.execute("""SELECT COUNT(*) FROM files WHERE ftppath = ? AND modify = ?""",
+                              (ftp_path, modify)) as cursor:
+            res = await cursor.fetchone()
+    return not bool(res[0])
 
 
 async def get_data(ftp_path: str, modify: str):
     file = ftp_path.split('/')[-1]
-    # client = aioftp.Client()
-    # await client.connect(host=host)
-    # await client.login(user='free', password='free')
-    # print(f"Downloading file {file}...")
-    # await client.download(ftp_path, f"Temp/{file}", write_into=True)
-    # print(f"Finished downloading file {file} into Temp/{file}")
-    # await client.quit()
     while True:
         try:
             async with aioftp.Client.context(host, port, login, password) as client:
@@ -91,50 +93,39 @@ async def get_data(ftp_path: str, modify: str):
                     })
                 os.unlink(f'Temp//{item}')
         z.close()
-    async with aiosqlite.connect('sqlite.db') as db:
-        for row in event_data:
-            await insert_event(db, row)
+    for row in event_data:
+        await insert_event(row)
 
 
-async def get_ftp_list():
+async def get_ftp_list(folder: str):
     async with aioftp.Client.context(host, port, login, password) as client:
-        x = await client.list('/fcs_regions/Tulskaja_obl/contracts/currMonth', recursive=False)
+        x = await client.list(folder, recursive=False)
     for path, info in x:
         print(path, info)
-        async with aiosqlite.connect('sqlite.db') as db:
-            print('Записей в базе нет:', await not_exist_in_db(db, str(path), info['modify']))
-
-            if info['size'] != '22' and await not_exist_in_db(db, str(path), info['modify']):
-                # print(info)
-                links.append(
-                    (str(path), info['modify'])
-                     # datetime.strptime(info['modify'], '%Y%m%d%H%M%S').astimezone(pytz.timezone('Europe/Moscow')).isoformat(sep='T', timespec='auto'))
-                )
-
-            # links.append(str(path))
+        no_rows_in_db = await not_exist_in_db(str(path), info['modify'])
+        print('Записей в базе нет:', no_rows_in_db)
+        if info['size'] != '22' and no_rows_in_db:
+            links.append(
+                (str(path), info['modify'])
+            )
 
 
 async def main():
-    async with aiosqlite.connect('sqlite.db') as db:
-        await db.execute(TABLE_FILES)
+    if not os.path.exists('Temp'):
+        os.mkdir('Temp')
+    await create_tables()
+
     tasks = [
-        asyncio.create_task(get_ftp_list())
+        asyncio.create_task(get_ftp_list(folder)) for folder in folders
     ]
     await asyncio.gather(*tasks)
     tasks = [
         asyncio.create_task(get_data(ftp_path, modify)) for ftp_path, modify in links
     ]
     await asyncio.gather(*tasks)
-    # print(event_data)
-    # async with aiosqlite.connect('sqlite.db') as db:
-    #     for event_data in event_data:
-    #         await insert_event(db, event_data)
 
 
 if __name__ == '__main__':
-
-    if not os.path.exists('Temp'):
-        os.mkdir('Temp')
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
