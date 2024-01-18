@@ -6,15 +6,30 @@ from datetime import datetime
 
 import aioftp
 import aiosqlite
+import asyncpg
 import pytz
-
 
 host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
 links = []
 folders = [
     '/fcs_regions/Tulskaja_obl/contracts/currMonth',
-    '/fcs_regions/Tulskaja_obl/contracts/prevMonth'
+    # '/fcs_regions/Tulskaja_obl/contracts/prevMonth'
 ]
+
+
+async def create_db():
+    try:
+        conn = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
+        await conn.close()
+        print('База постгрес существует')
+    except asyncpg.InvalidCatalogNameError:
+        print('База постгрес не существует')
+        conn = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='template1')
+        await conn.execute(
+                'CREATE DATABASE psql_db OWNER postgres'
+            )
+        await conn.close()
+        print('База постгрес создана')
 
 
 async def create_tables():
@@ -75,29 +90,30 @@ async def get_data(ftp_path: str, modify: str, sem):
                 print('ConnectionResetError')
                 pass
     event_data = []
-    # if file == 'contract_Tulskaja_obl_2024011200_2024011300_001.xml.zip':
-    with zipfile.ZipFile(f'Temp//{file}', 'r') as z:
-        for item in z.namelist():
-            if item.endswith('.xml') and not any([item.startswith('contractAvailableForElAct'), item.startswith('contractProcedureCancel')]):
-                print(f'Extract {item} from {ftp_path}')
-                z.extract(item, 'Temp')
-                with open(f'Temp//{item}') as f:
-                    src = f.read()
-                    if item.startswith('contract'):
-                        eisdocno = re.search(r'(?<=<regNum>)\d{19}(?=</regNum>)', src)[0]
-                    try:
-                        eispublicationdate = re.search(r'(?<=<publishDate>).+(?=</publishDate>)', src)[0]
-                    except Exception as e:
-                        print(e, item)
-                    print(eisdocno, eispublicationdate)
-                    event_data.append({
-                        'ftp_path': ftp_path,
-                        'modify': modify,
-                        'eisdocno': eisdocno,
-                        'eispublicationdate': eispublicationdate,
-                        'xmlname': item
-                    })
-                os.unlink(f'Temp//{item}')
+    if file == 'contract_Tulskaja_obl_2024011200_2024011300_001.xml.zip':
+        with zipfile.ZipFile(f'Temp//{file}', 'r') as z:
+            for item in z.namelist():
+                if item.endswith('.xml') and not any(
+                        [item.startswith('contractAvailableForElAct'), item.startswith('contractProcedureCancel')]):
+                    print(f'Extract {item} from {ftp_path}')
+                    z.extract(item, 'Temp')
+                    with open(f'Temp//{item}') as f:
+                        src = f.read()
+                        if item.startswith('contract'):
+                            eisdocno = re.search(r'(?<=<regNum>)\d{19}(?=</regNum>)', src)[0]
+                        try:
+                            eispublicationdate = re.search(r'(?<=<publishDate>).+(?=</publishDate>)', src)[0]
+                        except Exception as e:
+                            print(e, item)
+                        print(eisdocno, eispublicationdate)
+                        event_data.append({
+                            'ftp_path': ftp_path,
+                            'modify': modify,
+                            'eisdocno': eisdocno,
+                            'eispublicationdate': eispublicationdate,
+                            'xmlname': item
+                        })
+                    os.unlink(f'Temp//{item}')
     for row in event_data:
         await insert_event(row)
 
@@ -117,11 +133,11 @@ async def get_ftp_list(folder: str, sem):
 
 
 async def main():
-
     if not os.path.exists('Temp'):
         os.mkdir('Temp')
 
     await create_tables()
+    await create_db()
 
     semaphore = asyncio.Semaphore(50)
     tasks = [
