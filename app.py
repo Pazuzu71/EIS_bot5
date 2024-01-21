@@ -7,6 +7,7 @@ from datetime import datetime
 import aioftp
 import aiosqlite
 import asyncpg
+from asyncpg.connection import Connection
 import pytz
 
 host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
@@ -17,7 +18,7 @@ folders = [
 ]
 
 
-async def create_db():
+async def psql_create_db():
     try:
         conn = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
         await conn.close()
@@ -30,6 +31,29 @@ async def create_db():
             )
         await conn.close()
         print('База постгрес создана')
+
+
+async def psql_create_tables():
+    conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
+    await conn.execute('''
+            create table if not exists zip
+            (
+                zip_id SERIAL PRIMARY KEY,
+                ftp_path VARCHAR,
+                modify VARCHAR,
+                creationdate timestamp,
+                enddate timestamp)
+    ''')
+    await conn.execute('''
+                create table if not exists xml
+                (
+                zip_id INTEGER REFERENCES zip (zip_id) ON DELETE CASCADE,
+                xml_id SERIAL PRIMARY KEY,
+                eisdocno VARCHAR,
+                eispublicationdate timestamp,
+                xmlname VARCHAR)
+        ''')
+    await conn.close()
 
 
 async def create_tables():
@@ -47,6 +71,14 @@ async def create_tables():
             )"""
                                )
         await db.commit()
+
+
+async def psql_insert_event(row):
+    conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
+    await conn.execute('''INSERT INTO zip (ftp_path, modify, creationdate) VALUES ($1, $2, $3)''',
+                       row['ftp_path'], row['modify'], datetime.now()
+                       )
+    await conn.close()
 
 
 async def insert_event(row):
@@ -76,9 +108,9 @@ async def not_exist_in_db(ftp_path: str, modify: str):
     return not bool(res[0])
 
 
-async def get_data(ftp_path: str, modify: str, sem):
+async def get_data(ftp_path: str, modify: str, semaphore):
     file = ftp_path.split('/')[-1]
-    async with sem:
+    async with semaphore:
         while True:
             try:
                 async with aioftp.Client.context(host, port, login, password) as client:
@@ -115,18 +147,20 @@ async def get_data(ftp_path: str, modify: str, sem):
                         })
                     os.unlink(f'Temp//{item}')
     for row in event_data:
+        await psql_insert_event(row)
         await insert_event(row)
 
 
-async def get_ftp_list(folder: str, sem):
-    async with sem:
+async def get_ftp_list(folder: str, semaphore):
+    async with semaphore:
         async with aioftp.Client.context(host, port, login, password) as client:
             x = await client.list(folder, recursive=False)
         for path, info in x:
-            print(path, info)
-            no_rows_in_db = await not_exist_in_db(str(path), info['modify'])
-            print('Записей в базе нет:', no_rows_in_db)
-            if info['size'] != '22' and no_rows_in_db:
+            # print(path, info)
+            # no_rows_in_db = await not_exist_in_db(str(path), info['modify'])
+            # print('Записей в базе нет:', no_rows_in_db)
+            # if info['size'] != '22' and no_rows_in_db:
+            if info['size'] != '22':
                 links.append(
                     (str(path), info['modify'])
                 )
@@ -137,7 +171,8 @@ async def main():
         os.mkdir('Temp')
 
     await create_tables()
-    await create_db()
+    await psql_create_db()
+    await psql_create_tables()
 
     semaphore = asyncio.Semaphore(50)
     tasks = [
