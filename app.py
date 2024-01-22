@@ -18,7 +18,7 @@ folders = [
 ]
 
 
-async def psql_create_db():
+async def create_psql_db():
     try:
         conn = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
         await conn.close()
@@ -27,13 +27,13 @@ async def psql_create_db():
         print('База постгрес не существует')
         conn = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='template1')
         await conn.execute(
-                'CREATE DATABASE psql_db OWNER postgres'
-            )
+            'CREATE DATABASE psql_db OWNER postgres'
+        )
         await conn.close()
         print('База постгрес создана')
 
 
-async def psql_create_tables():
+async def create_psql_tables():
     conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
     await conn.execute('''
             create table if not exists zip
@@ -50,7 +50,7 @@ async def psql_create_tables():
                 zip_id INTEGER REFERENCES zip (zip_id) ON DELETE CASCADE,
                 xml_id SERIAL PRIMARY KEY,
                 eisdocno VARCHAR,
-                eispublicationdate timestamp,
+                eispublicationdate timestamp with time zone,
                 xmlname VARCHAR)
         ''')
     await conn.close()
@@ -73,11 +73,16 @@ async def create_tables():
         await db.commit()
 
 
-async def psql_insert_event(row):
+async def insert_psql_event(row):
     conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
     await conn.execute('''INSERT INTO zip (ftp_path, modify, creationdate) VALUES ($1, $2, $3)''',
                        row['ftp_path'], row['modify'], datetime.now()
                        )
+    zip_id = await conn.fetchval("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
+                                 row['ftp_path'], row['modify'], column=0)
+    print('zip_id', zip_id)
+    await conn.execute("""INSERT INTO xml (zip_id, eisdocno, eispublicationdate, xmlname) VALUES ($1, $2, $3, $4)""",
+                       zip_id, row['eisdocno'], row['eispublicationdate'], row['xmlname'])
     await conn.close()
 
 
@@ -98,6 +103,15 @@ async def insert_event(row):
                              datetime.now(pytz.timezone('Europe/Moscow')).isoformat(sep='T', timespec='auto')
                          ))
         await db.commit()
+
+
+async def exist_in_psql_db(ftp_path: str, modify: str):
+    conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
+    is_exist = await conn.fetch("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
+                                ftp_path, modify)
+    await conn.close()
+    # print('is_exist', is_exist)
+    return is_exist
 
 
 async def not_exist_in_db(ftp_path: str, modify: str):
@@ -142,25 +156,26 @@ async def get_data(ftp_path: str, modify: str, semaphore):
                             'ftp_path': ftp_path,
                             'modify': modify,
                             'eisdocno': eisdocno,
-                            'eispublicationdate': eispublicationdate,
+                            'eispublicationdate': datetime.fromisoformat(eispublicationdate),
                             'xmlname': item
                         })
                     os.unlink(f'Temp//{item}')
     for row in event_data:
-        await psql_insert_event(row)
+        await insert_psql_event(row)
         await insert_event(row)
 
 
 async def get_ftp_list(folder: str, semaphore):
     async with semaphore:
         async with aioftp.Client.context(host, port, login, password) as client:
-            x = await client.list(folder, recursive=False)
-        for path, info in x:
+            ftp_list = await client.list(folder, recursive=False)
+        for path, info in ftp_list:
             # print(path, info)
             # no_rows_in_db = await not_exist_in_db(str(path), info['modify'])
             # print('Записей в базе нет:', no_rows_in_db)
             # if info['size'] != '22' and no_rows_in_db:
-            if info['size'] != '22':
+            exist_in_db = await exist_in_psql_db(str(path), info['modify'])
+            if info['size'] != '22' and not exist_in_db:
                 links.append(
                     (str(path), info['modify'])
                 )
@@ -171,8 +186,8 @@ async def main():
         os.mkdir('Temp')
 
     await create_tables()
-    await psql_create_db()
-    await psql_create_tables()
+    await create_psql_db()
+    await create_psql_tables()
 
     semaphore = asyncio.Semaphore(50)
     tasks = [
