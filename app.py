@@ -92,7 +92,7 @@ async def insert_psql_xml(row):
 
 
 async def insert_event(row):
-    """Insert a new event into the files table"""
+
     async with aiosqlite.connect('sqlite.db') as db:
         sql = """INSERT INTO files 
                   (ftppath, modify, eisdocno, eispublicationdate, xmlname, creationdate)  
