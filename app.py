@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import zipfile
+import time
 from datetime import datetime
 
 
@@ -14,7 +15,7 @@ host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
 links = []
 folders = [
     '/fcs_regions/Tulskaja_obl/contracts/currMonth',
-    '/fcs_regions/Tulskaja_obl/contracts/prevMonth'
+    # '/fcs_regions/Tulskaja_obl/contracts/prevMonth'
 ]
 
 
@@ -56,36 +57,36 @@ async def create_psql_tables():
     await conn.close()
 
 
-async def insert_psql_zip(ftp_path: str, modify: str, semaphore_psql):
-    async with semaphore_psql:
-        conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
-        await conn.execute('''INSERT INTO zip (ftp_path, modify, creationdate) VALUES ($1, $2, $3)''',
-                           ftp_path, modify, datetime.now()
-                           )
-        await conn.close()
+async def insert_psql_zip(ftp_path: str, modify: str):
+
+    conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
+    await conn.execute('''INSERT INTO zip (ftp_path, modify, creationdate) VALUES ($1, $2, $3)''',
+                       ftp_path, modify, datetime.now()
+                       )
+    await conn.close()
 
 
-async def insert_psql_xml(row, semaphore_psql):
-    async with semaphore_psql:
-        conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
-        zip_id = await conn.fetchval("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
-                                     row['ftp_path'], row['modify'], column=0)
-        # print('zip_id', zip_id)
-        await conn.execute("""INSERT INTO xml (zip_id, eisdocno, eispublicationdate, xmlname) VALUES ($1, $2, $3, $4)""",
-                           zip_id, row['eisdocno'], row['eispublicationdate'], row['xmlname'])
-        await conn.close()
+async def insert_psql_xml(row):
+
+    conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
+    zip_id = await conn.fetchval("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
+                                 row['ftp_path'], row['modify'], column=0)
+    # print('zip_id', zip_id)
+    await conn.execute("""INSERT INTO xml (zip_id, eisdocno, eispublicationdate, xmlname) VALUES ($1, $2, $3, $4)""",
+                       zip_id, row['eisdocno'], row['eispublicationdate'], row['xmlname'])
+    await conn.close()
 
 
-async def exist_in_psql_db(ftp_path: str, modify: str, semaphore_psql):
-    async with semaphore_psql:
-        conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
-        is_exist = await conn.fetch("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
-                                    ftp_path, modify)
-        await conn.close()
+async def exist_in_psql_db(ftp_path: str, modify: str):
+
+    conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
+    is_exist = await conn.fetch("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
+                                ftp_path, modify)
+    await conn.close()
     return is_exist
 
 
-async def get_data(ftp_path: str, modify: str, semaphore, semaphore_psql):
+async def get_data(ftp_path: str, modify: str, semaphore):
     file = ftp_path.split('/')[-1]
     async with semaphore:
         while True:
@@ -125,17 +126,17 @@ async def get_data(ftp_path: str, modify: str, semaphore, semaphore_psql):
                     })
                 os.unlink(f'Temp//{item}')
     os.unlink(f'Temp//{file}')
-    await insert_psql_zip(ftp_path, modify, semaphore_psql)
+    await insert_psql_zip(ftp_path, modify)
     for row in event_data:
-        await insert_psql_xml(row, semaphore_psql)
+        await insert_psql_xml(row)
 
 
-async def get_ftp_list(folder: str, semaphore, semaphore_psql):
+async def get_ftp_list(folder: str, semaphore):
     async with semaphore:
         async with aioftp.Client.context(host, port, login, password) as client:
             ftp_list = await client.list(folder, recursive=False)
         for path, info in ftp_list:
-            exist_in_db = await exist_in_psql_db(str(path), info['modify'], semaphore_psql)
+            exist_in_db = await exist_in_psql_db(str(path), info['modify'])
             if info['size'] != '22' and not exist_in_db:
                 links.append(
                     (str(path), info['modify'])
@@ -149,20 +150,22 @@ async def main():
     await create_psql_db()
     await create_psql_tables()
 
-    semaphore = asyncio.Semaphore(25)
-    semaphore_psql = asyncio.Semaphore(25)
+    semaphore = asyncio.Semaphore(80)
+    # semaphore_psql = asyncio.Semaphore(75)
     tasks = [
-        asyncio.create_task(get_ftp_list(folder, semaphore, semaphore_psql)) for folder in folders
+        asyncio.create_task(get_ftp_list(folder, semaphore)) for folder in folders
     ]
     await asyncio.gather(*tasks)
     tasks = [
-        asyncio.create_task(get_data(ftp_path, modify, semaphore, semaphore_psql)) for ftp_path, modify in links
+        asyncio.create_task(get_data(ftp_path, modify, semaphore)) for ftp_path, modify in links
     ]
     await asyncio.gather(*tasks)
 
 
 if __name__ == '__main__':
+    start = time.time()
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         print('Ошибка, останов бота!')
+    print('Время работы: ', divmod(time.time() - start, 60))
