@@ -14,8 +14,11 @@ from asyncpg.connection import Connection
 host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
 links = []
 folders = [
-    '/fcs_regions/Tulskaja_obl/contracts/currMonth',
-    # '/fcs_regions/Tulskaja_obl/contracts/prevMonth'
+    # '/fcs_regions/Tulskaja_obl/contracts/currMonth',
+    # '/fcs_regions/Tulskaja_obl/contracts/prevMonth',
+    '/fcs_regions/Tulskaja_obl/notifications/currMonth',
+    # '/fcs_regions/Tulskaja_obl/notifications/prevMonth'
+
 ]
 
 
@@ -71,7 +74,6 @@ async def insert_psql_xml(row):
     conn: Connection = await asyncpg.connect(host='127.0.0.1', user='postgres', password='123', database='psql_db')
     zip_id = await conn.fetchval("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
                                  row['ftp_path'], row['modify'], column=0)
-    # print('zip_id', zip_id)
     await conn.execute("""INSERT INTO xml (zip_id, eisdocno, eispublicationdate, xmlname) VALUES ($1, $2, $3, $4)""",
                        zip_id, row['eisdocno'], row['eispublicationdate'], row['xmlname'])
     await conn.close()
@@ -103,32 +105,45 @@ async def get_data(ftp_path: str, modify: str, semaphore):
     # if file == 'contract_Tulskaja_obl_2024011200_2024011300_001.xml.zip':
     with zipfile.ZipFile(f'Temp//{file}', 'r') as z:
         for item in z.namelist():
-            if item.endswith('.xml') and not any(
-                    [item.startswith('contractAvailableForElAct'), item.startswith('contractProcedureCancel')]):
+            # if item.endswith('.xml') and not any(
+            #         [item.startswith('contractAvailableForElAct'), item.startswith('contractProcedureCancel')]):
+            if item.endswith('.xml') and any(
+                    [item.startswith('contractProcedure_'), item.startswith('contract_'),
+                     all([item.startswith('epNotification'), not item.startswith('epNotificationCancel')])]):
                 print(f'Extract {item} from {file}')
                 z.extract(item, 'Temp')
                 with open(f'Temp//{item}') as f:
                     src = f.read()
                     if item.startswith('contract'):
-                        eisdocno = re.search(r'(?<=<regNum>)\d{19}(?=</regNum>)', src)[0]
-                        eispublicationdate = re.search(r'(?<=<publishDate>).+(?=</publishDate>)', src)[0]
-                    # try:
-                    #     eispublicationdate = re.search(r'(?<=<publishDate>).+(?=</publishDate>)', src)[0]
-                    # except Exception as e:
-                    #     print(e, item)
-                    # print(eisdocno, eispublicationdate)
-                    event_data.append({
-                        'ftp_path': ftp_path,
-                        'modify': modify,
-                        'eisdocno': eisdocno,
-                        'eispublicationdate': datetime.fromisoformat(eispublicationdate),
-                        'xmlname': item
-                    })
+                        try:
+                            eisdocno = re.search(r'(?<=<regNum>)\d{19}(?=</regNum>)', src)[0]
+                            eispublicationdate = re.search(r'(?<=<publishDate>).+(?=</publishDate>)', src)[0]
+                        except Exception as e:
+                            print(e, item)
+                    if item.startswith('epNotification'):
+                        try:
+                            eisdocno = re.search(r'(?<=<ns9:purchaseNumber>)\d{19}(?=</ns9:purchaseNumber>)', src)[0]
+                            eispublicationdate = re.search(r'(?<=<ns9:publishDTInEIS>).+(?=</ns9:publishDTInEIS>)', src)[0]
+                        except Exception as e:
+                            print(e, item)
+
+                    try:
+                        event_data.append({
+                            'ftp_path': ftp_path,
+                            'modify': modify,
+                            'eisdocno': eisdocno,
+                            'eispublicationdate': datetime.fromisoformat(eispublicationdate),
+                            'xmlname': item
+                        })
+                    except Exception as e:
+                        print(e)
+
                 os.unlink(f'Temp//{item}')
     os.unlink(f'Temp//{file}')
-    await insert_psql_zip(ftp_path, modify)
-    for row in event_data:
-        await insert_psql_xml(row)
+    if event_data:
+        await insert_psql_zip(ftp_path, modify)
+        for row in event_data:
+            await insert_psql_xml(row)
 
 
 async def get_ftp_list(folder: str, semaphore):
@@ -151,7 +166,6 @@ async def main():
     await create_psql_tables()
 
     semaphore = asyncio.Semaphore(80)
-    # semaphore_psql = asyncio.Semaphore(75)
     tasks = [
         asyncio.create_task(get_ftp_list(folder, semaphore)) for folder in folders
     ]
