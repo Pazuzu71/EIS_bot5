@@ -8,28 +8,38 @@ from datetime import datetime
 
 import aioftp
 import asyncpg
-from asyncpg.connection import Connection
+from asyncpg.pool import Pool
 
 # TODO вынести все константы в отдельный файлы или в переменные окружения
 host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
 links = []
 folders = [
-    # '/fcs_regions/Tulskaja_obl/contracts/currMonth',
-    # '/fcs_regions/Tulskaja_obl/contracts/prevMonth',
-    '/fcs_regions/Tulskaja_obl/notifications/currMonth',
+    '/fcs_regions/Tulskaja_obl/contracts/currMonth',
+    '/fcs_regions/Tulskaja_obl/contracts/prevMonth',
+    # '/fcs_regions/Tulskaja_obl/notifications/currMonth',
     # '/fcs_regions/Tulskaja_obl/notifications/prevMonth',
     # '/fcs_regions/Tulskaja_obl/plangraphs2020/currMonth',
     # '/fcs_regions/Tulskaja_obl/plangraphs2020/prevMonth',
     # '/fcs_regions/Tulskaja_obl/protocols/currMonth',
     # '/fcs_regions/Tulskaja_obl/protocols/prevMonth',
 ]
-psql_connection_descriptor = dict(host='127.0.0.1', user='db_user', password='myPassword', database='psql_db')
+credentials = dict(
+    host='127.0.0.1',
+    port=5432,
+    user='db_user',
+    password='myPassword',
+    database='psql_db',
+    min_size=5,
+    max_size=75
+)
 
-# TODO переделать подключения на пул подключений
+
+async def create_pool(credentials_dct):
+    return await asyncpg.create_pool(**credentials_dct)
 
 
-async def create_psql_tables():
-    conn: Connection = await asyncpg.connect(**psql_connection_descriptor)
+async def create_psql_tables(pool: Pool):
+    conn = await pool.acquire()
     await conn.execute('''
             create table if not exists zip
             (
@@ -48,38 +58,38 @@ async def create_psql_tables():
                 eispublicationdate timestamp with time zone,
                 xmlname VARCHAR)
         ''')
-    await conn.close()
+    await pool.release(conn)
 
 
-async def insert_psql_zip(ftp_path: str, modify: str):
+async def insert_psql_zip(pool: Pool, ftp_path: str, modify: str):
     """Добавление записи в таблицу zip"""
-    conn: Connection = await asyncpg.connect(**psql_connection_descriptor)
+    conn = await pool.acquire()
     await conn.execute('''INSERT INTO zip (ftp_path, modify, creationdate) VALUES ($1, $2, $3)''',
                        ftp_path, modify, datetime.now()
                        )
-    await conn.close()
+    await pool.release(conn)
 
 
-async def insert_psql_xml(row):
+async def insert_psql_xml(pool: Pool, row: dict):
     """Добавление записи в таблицу xml"""
     # TODO проверить конвертацию поля eispublicationdate в зонах времени
-    conn: Connection = await asyncpg.connect(**psql_connection_descriptor)
+    conn = await pool.acquire()
     zip_id = await conn.fetchval("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
                                  row['ftp_path'], row['modify'], column=0)
     await conn.execute("""INSERT INTO xml (zip_id, eisdocno, eispublicationdate, xmlname) VALUES ($1, $2, $3, $4)""",
                        zip_id, row['eisdocno'], row['eispublicationdate'], row['xmlname'])
-    await conn.close()
+    await pool.release(conn)
 
 
-async def exist_in_psql_db(ftp_path: str, modify: str):
-    conn: Connection = await asyncpg.connect(**psql_connection_descriptor)
+async def exist_in_psql_db(pool: Pool, ftp_path: str, modify: str):
+    conn = await pool.acquire()
     is_exist = await conn.fetch("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
                                 ftp_path, modify)
-    await conn.close()
+    await pool.release(conn)
     return is_exist
 
 
-async def get_data(ftp_path: str, modify: str, semaphore):
+async def get_data(pool: Pool, ftp_path: str, modify: str, semaphore):
     file = ftp_path.split('/')[-1]
     async with semaphore:
         while True:
@@ -136,18 +146,18 @@ async def get_data(ftp_path: str, modify: str, semaphore):
 
                 os.unlink(f'Temp//{item}')
     os.unlink(f'Temp//{file}')
-    await insert_psql_zip(ftp_path, modify)
+    await insert_psql_zip(pool, ftp_path, modify)
     if event_data:
         for row in event_data:
-            await insert_psql_xml(row)
+            await insert_psql_xml(pool, row)
 
 
-async def get_ftp_list(folder: str, semaphore):
+async def get_ftp_list(pool: Pool, folder: str, semaphore):
     async with semaphore:
         async with aioftp.Client.context(host, port, login, password) as client:
             ftp_list = await client.list(folder, recursive=False)
         for path, info in ftp_list:
-            exist_in_db = await exist_in_psql_db(str(path), info['modify'])
+            exist_in_db = await exist_in_psql_db(pool, str(path), info['modify'])
             if info['size'] != '22' and not exist_in_db:
                 links.append(
                     (str(path), info['modify'])
@@ -158,15 +168,16 @@ async def main():
     if not os.path.exists('Temp'):
         os.mkdir('Temp')
 
-    await create_psql_tables()
+    pool = await create_pool(credentials)
+    await create_psql_tables(pool)
 
     semaphore = asyncio.Semaphore(50)
     tasks = [
-        asyncio.create_task(get_ftp_list(folder, semaphore)) for folder in folders
+        asyncio.create_task(get_ftp_list(pool, folder, semaphore)) for folder in folders
     ]
     await asyncio.gather(*tasks)
     tasks = [
-        asyncio.create_task(get_data(ftp_path, modify, semaphore)) for ftp_path, modify in links
+        asyncio.create_task(get_data(pool, ftp_path, modify, semaphore)) for ftp_path, modify in links
     ]
     await asyncio.gather(*tasks)
 
