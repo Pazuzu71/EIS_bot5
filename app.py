@@ -14,14 +14,16 @@ from asyncpg.pool import Pool
 host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
 links = []
 folders = [
-    '/fcs_regions/Tulskaja_obl/contracts/currMonth',
-    '/fcs_regions/Tulskaja_obl/contracts/prevMonth',
+    # '/fcs_regions/Tulskaja_obl/contracts/currMonth',
+    # '/fcs_regions/Tulskaja_obl/contracts/prevMonth',
     # '/fcs_regions/Tulskaja_obl/notifications/currMonth',
     # '/fcs_regions/Tulskaja_obl/notifications/prevMonth',
     # '/fcs_regions/Tulskaja_obl/plangraphs2020/currMonth',
     # '/fcs_regions/Tulskaja_obl/plangraphs2020/prevMonth',
     # '/fcs_regions/Tulskaja_obl/protocols/currMonth',
     # '/fcs_regions/Tulskaja_obl/protocols/prevMonth',
+    '/fcs_regions/Tulskaja_obl/contractprojects/currMonth',
+    '/fcs_regions/Tulskaja_obl/contractprojects/prevMonth',
 ]
 credentials = dict(
     host='127.0.0.1',
@@ -109,7 +111,8 @@ async def get_data(pool: Pool, ftp_path: str, modify: str, semaphore):
             if item.endswith('.xml') and any(
                     [item.startswith('contractProcedure_'), item.startswith('contract_'),
                      all([item.startswith('epNotification'), not item.startswith('epNotificationCancel')]),
-                     item.startswith('tenderPlan2020_'), item.startswith('epProtocol')]):
+                     item.startswith('tenderPlan2020_'), item.startswith('epProtocol'),
+                     item.startswith('cpContractSign')]):
                 print(f'Extract {item} from {file}')
                 z.extract(item, 'Temp')
                 with open(f'Temp//{item}') as f:
@@ -130,6 +133,13 @@ async def get_data(pool: Pool, ftp_path: str, modify: str, semaphore):
                         try:
                             eisdocno = re.search(r'(?<=<ns5:planNumber>)\d{18}(?=</ns5:planNumber>)', src)[0]
                             eispublicationdate = re.search(r'(?<=<ns5:publishDate>).+(?=</ns5:publishDate>)', src)[0]
+                        except Exception as e:
+                            print(e, item)
+                    if item.startswith('cpContractSign'):
+                        try:
+                            common_info = re.search(r'(?<=<ns7:commonInfo>).+(?=</ns7:commonInfo>)', src, flags=re.DOTALL)[0]
+                            eisdocno = re.search(r'(?<=<ns7:number>)\d{23}(?=</ns7:number>)', common_info)[0]
+                            eispublicationdate = re.search(r'(?<=<ns7:publishDTInEIS>).+(?=</ns7:publishDTInEIS>)', common_info)[0]
                         except Exception as e:
                             print(e, item)
 
