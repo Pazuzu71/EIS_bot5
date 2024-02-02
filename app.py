@@ -41,10 +41,6 @@ credentials = dict(
 )
 
 
-async def create_pool(credentials_dct):
-    return await asyncpg.create_pool(**credentials_dct)
-
-
 async def create_psql_tables(pool: Pool):
     conn = await pool.acquire()
     await conn.execute('''
@@ -94,6 +90,11 @@ async def exist_in_psql_db(pool: Pool, ftp_path: str, modify: str):
                                 ftp_path, modify)
     await pool.release(conn)
     return is_exist
+
+
+async def get_psql_paths(pool: Pool):
+    async with pool.acquire() as conn:
+        return await conn.fetch("""SELECT ftp_path, modify FROM zip WHERE enddate IS NULL""")
 
 
 async def get_data(pool: Pool, ftp_path: str, modify: str, semaphore):
@@ -181,22 +182,50 @@ async def get_ftp_list(pool: Pool, folder: str, semaphore):
                     )
 
 
+async def set_psql_enddate(pool: Pool, ftp_path: str, semaphore):
+    pass
+
+
+async def exist_on_ftp(pool: Pool, ftp_path: str, modify: str, semaphore):
+    async with semaphore:
+        while True:
+            try:
+                async with aioftp.Client.context(host, port, login, password) as client:
+                    try:
+                        info = await client.stat(ftp_path)
+                        print(info)
+                        if info['modify'] != modify:
+                            print('Здесь надо будет обновить в базе enddate, отличается дата модификации')
+                            await set_psql_enddate(pool, ftp_path, semaphore)
+                    except aioftp.errors.StatusCodeError:
+                        print(aioftp.errors.StatusCodeError, ftp_path)
+                        print('Здесь надо будет обновить в базе enddate')
+                        await set_psql_enddate(pool, ftp_path, semaphore)
+                break
+            except ConnectionResetError:
+                print('ConnectionResetError')
+                pass
+
+
 async def main():
     if not os.path.exists('Temp'):
         os.mkdir('Temp')
-
-    pool = await create_pool(credentials)
-    await create_psql_tables(pool)
-
     semaphore = asyncio.Semaphore(50)
-    tasks = [
-        asyncio.create_task(get_ftp_list(pool, folder, semaphore)) for folder in folders
-    ]
-    await asyncio.gather(*tasks)
-    tasks = [
-        asyncio.create_task(get_data(pool, ftp_path, modify, semaphore)) for ftp_path, modify in links
-    ]
-    await asyncio.gather(*tasks)
+    async with asyncpg.create_pool(**credentials) as pool:
+        await create_psql_tables(pool)
+        psql_list = await get_psql_paths(pool)
+        tasks = [
+            asyncio.create_task(exist_on_ftp(pool, ftp_path, modify, semaphore)) for ftp_path, modify in psql_list
+        ]
+        await asyncio.gather(*tasks)
+        tasks = [
+            asyncio.create_task(get_ftp_list(pool, folder, semaphore)) for folder in folders
+        ]
+        await asyncio.gather(*tasks)
+        tasks = [
+            asyncio.create_task(get_data(pool, ftp_path, modify, semaphore)) for ftp_path, modify in links
+        ]
+        await asyncio.gather(*tasks)
 
 
 if __name__ == '__main__':
