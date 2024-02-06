@@ -14,18 +14,18 @@ from asyncpg.pool import Pool
 host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
 
 folders = [
-    # '/fcs_regions/Tulskaja_obl/contracts',
-    # '/fcs_regions/Tulskaja_obl/contracts/currMonth',
-    # '/fcs_regions/Tulskaja_obl/contracts/prevMonth',
-    # '/fcs_regions/Tulskaja_obl/notifications',
-    # '/fcs_regions/Tulskaja_obl/notifications/currMonth',
-    # '/fcs_regions/Tulskaja_obl/notifications/prevMonth',
-    # '/fcs_regions/Tulskaja_obl/plangraphs2020',
-    # '/fcs_regions/Tulskaja_obl/plangraphs2020/currMonth',
-    # '/fcs_regions/Tulskaja_obl/plangraphs2020/prevMonth',
-    # '/fcs_regions/Tulskaja_obl/protocols',
-    # '/fcs_regions/Tulskaja_obl/protocols/currMonth',
-    # '/fcs_regions/Tulskaja_obl/protocols/prevMonth',
+    '/fcs_regions/Tulskaja_obl/contracts',
+    '/fcs_regions/Tulskaja_obl/contracts/currMonth',
+    '/fcs_regions/Tulskaja_obl/contracts/prevMonth',
+    '/fcs_regions/Tulskaja_obl/notifications',
+    '/fcs_regions/Tulskaja_obl/notifications/currMonth',
+    '/fcs_regions/Tulskaja_obl/notifications/prevMonth',
+    '/fcs_regions/Tulskaja_obl/plangraphs2020',
+    '/fcs_regions/Tulskaja_obl/plangraphs2020/currMonth',
+    '/fcs_regions/Tulskaja_obl/plangraphs2020/prevMonth',
+    '/fcs_regions/Tulskaja_obl/protocols',
+    '/fcs_regions/Tulskaja_obl/protocols/currMonth',
+    '/fcs_regions/Tulskaja_obl/protocols/prevMonth',
     '/fcs_regions/Tulskaja_obl/contractprojects',
     '/fcs_regions/Tulskaja_obl/contractprojects/currMonth',
     '/fcs_regions/Tulskaja_obl/contractprojects/prevMonth',
@@ -36,8 +36,9 @@ credentials = dict(
     user='db_user',
     password='myPassword',
     database='psql_db',
-    min_size=5,
-    max_size=75
+    min_size=10,
+    max_size=75,
+    max_inactive_connection_lifetime=0
 )
 
 
@@ -98,21 +99,7 @@ async def get_psql_paths(pool: Pool):
         return await conn.fetch("""SELECT ftp_path, modify FROM zip WHERE enddate IS NULL""")
 
 
-async def get_data(pool: Pool, ftp_path: str, modify: str, semaphore):
-    file = ftp_path.split('/')[-1]
-    # if file not in ['currMonth', 'prevMonth']:
-    async with semaphore:
-        while True:
-            try:
-                async with aioftp.Client(socket_timeout=30).context(host, port, login, password) as client:
-                    print(f"Downloading file {file}...")
-                    await client.download(ftp_path, f"Temp/{file}", write_into=True)
-                    print(f"Finished downloading file {file} into Temp/{file}")
-                break
-            except ConnectionResetError:
-                print('ConnectionResetError при получении новых данных с фтп')
-                pass
-
+async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str):
     event_data = []
     # if file == 'notification_Tulskaja_obl_2024010100_2024010200_001.xml.zip':
     with zipfile.ZipFile(f'Temp//{file}', 'r') as z:
@@ -171,6 +158,24 @@ async def get_data(pool: Pool, ftp_path: str, modify: str, semaphore):
             await insert_psql_xml(pool, row)
 
 
+async def get_data(pool: Pool, file: str, ftp_path: str, modify: str, semaphore):
+    async with semaphore:
+        while True:
+            try:
+                async with aioftp.Client().context(host, port, login, password) as client:
+                    print(f"Downloading file {file}...")
+                    await client.download(ftp_path, f"Temp/{file}", write_into=True)
+                    print(f"Finished downloading file {file} into Temp/{file}")
+                break
+            except ConnectionResetError:
+                time.sleep(1)
+                print(f'Алярм!!! {file}', os.path.exists(f"Temp/{file}"))
+                if os.path.exists(f"Temp/{file}"):
+                    os.unlink(f"Temp/{file}")
+                print(f'ConnectionResetError при получении {file} с фтп')
+        await insert_data(pool, file, ftp_path, modify)
+
+
 async def get_ftp_list(pool: Pool, folder: str, semaphore):
     async with semaphore:
         async with aioftp.Client.context(host, port, login, password) as client:
@@ -181,7 +186,7 @@ async def get_ftp_list(pool: Pool, folder: str, semaphore):
                 # TODO текущий и прошлый месяцы будут всегда, года вынести в отдельный параметр
                 if any(sub_path in str(path) for sub_path in ['currMonth', 'prevMonth'] + ['2022', '2023']):
                     links.append(
-                        (str(path), info['modify'])
+                        (str(path).split('/')[-1], str(path), info['modify'])
                     )
 
 
@@ -189,54 +194,82 @@ async def set_psql_enddate(pool: Pool, ftp_path: str):
     async with pool.acquire() as conn:
         await conn.execute("""UPDATE zip set enddate = $1 WHERE ftp_path = $2""", datetime.now(), ftp_path)
 
-# todo вот здесь надо подумать в первую очередь
+
 async def exist_on_ftp(pool: Pool, ftp_path: str, modify: str, semaphore):
     async with semaphore:
         while True:
             try:
                 async with aioftp.Client.context(host, port, login, password) as client:
-                    try:
+                    if await client.exists(ftp_path):
                         info = await client.stat(ftp_path)
-                        # print(info)
-                        if info['modify'] != modify:
-                            await set_psql_enddate(pool, ftp_path)
-                            print(f'enddate обновлен, отличается дата модификации: {ftp_path}')
-                    except aioftp.errors.StatusCodeError:
-                        # print(aioftp.errors.StatusCodeError, ftp_path)
+                    else:
                         await set_psql_enddate(pool, ftp_path)
                         print(f'enddate обновлен, такого пути не существует: {ftp_path}')
-                break
+                        break
+                    if info['modify'] != modify:
+                        await set_psql_enddate(pool, ftp_path)
+                        print(f'enddate обновлен, отличается дата модификации: {ftp_path}')
+                    break
             except ConnectionResetError:
                 print(f'ConnectionResetError при получении статистики с фтп для обновлении enddate: {ftp_path}')
-                pass
+
+
+# функция-коллбэк, сообщающая о завершении задач
+def progress(context):
+    # вывод сведений о завершении работы задачи
+    print("Task completion received...")
+    print("Name of the task:%s" % context.get_name())
+    print("Wrapped coroutine object:%s" % context.get_coro())
+    print("Task is done:%s" % context.done())
+    print("Task has been cancelled:%s" % context.cancelled())
+    print("Task result:%s" % context.result())
+    print(type(context))
+    print(context)
 
 
 async def main():
     # Создаем темп.
     if not os.path.exists('Temp'):
         os.mkdir('Temp')
-    semaphore = asyncio.Semaphore(50)
+    semaphore = asyncio.Semaphore(10)
     async with asyncpg.create_pool(**credentials) as pool:
         # Создаем таблицы.
+        print('Создаем таблицы.')
         await create_psql_tables(pool)
         # Получаем все пути из базы.
+        print('Получаем все пути из базы.')
         psql_list = await get_psql_paths(pool)
         # Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.
+        print('Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.')
         tasks = [
             asyncio.create_task(exist_on_ftp(pool, ftp_path, modify, semaphore)) for ftp_path, modify in psql_list
         ]
         await asyncio.gather(*tasks)
         # Получаем список путей с фтп.
-
+        print('Получаем список путей с фтп.')
         tasks = [
             asyncio.create_task(get_ftp_list(pool, folder, semaphore)) for folder in folders
         ]
         await asyncio.gather(*tasks)
-        # Скачиваем файлы с фтп ЕИС в темп
+        print(f'всего файлов для скачивания {len(links)}')
+        # Скачиваем файлы с фтп ЕИС в темп.
+        print('Скачиваем файлы с фтп ЕИС в темп')
         tasks = [
-            asyncio.create_task(get_data(pool, ftp_path, modify, semaphore)) for ftp_path, modify in links
+            asyncio.create_task(get_data(pool, file, ftp_path, modify, semaphore)) for file, ftp_path, modify in links
         ]
         await asyncio.gather(*tasks)
+        #
+        # for task in tasks:
+        #     await task
+
+        # Пишем данные по скачанным файлам в базу.
+        # print('Пишем данные по скачанным файлам в базу')
+        # tasks = [
+        #     asyncio.create_task(insert_data(pool, file, ftp_path, modify)) for file, ftp_path, modify in links
+        # ]
+        # await asyncio.gather(*tasks)
+
+        #todo возможно чистим папку темп далее
 
 
 if __name__ == '__main__':
