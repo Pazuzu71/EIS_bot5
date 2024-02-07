@@ -36,7 +36,7 @@ credentials = dict(
     user='db_user',
     password='myPassword',
     database='psql_db',
-    min_size=10,
+    min_size=5,
     max_size=75,
     max_inactive_connection_lifetime=0
 )
@@ -196,6 +196,7 @@ async def set_psql_enddate(pool: Pool, ftp_path: str):
 
 
 async def exist_on_ftp(pool: Pool, ftp_path: str, modify: str, semaphore):
+    # start = time.time()
     async with semaphore:
         while True:
             try:
@@ -209,6 +210,7 @@ async def exist_on_ftp(pool: Pool, ftp_path: str, modify: str, semaphore):
                     if info['modify'] != modify:
                         await set_psql_enddate(pool, ftp_path)
                         print(f'enddate обновлен, отличается дата модификации: {ftp_path}')
+                    # print(f'проверяли {ftp_path} ', time.time() - start)
                     break
             except ConnectionResetError:
                 print(f'ConnectionResetError при получении статистики с фтп для обновлении enddate: {ftp_path}')
@@ -232,6 +234,7 @@ async def main():
     if not os.path.exists('Temp'):
         os.mkdir('Temp')
     semaphore = asyncio.Semaphore(10)
+    # semaphore2 = asyncio.Semaphore(50)
     async with asyncpg.create_pool(**credentials) as pool:
         # Создаем таблицы.
         print('Создаем таблицы.')
