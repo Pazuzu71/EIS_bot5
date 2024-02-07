@@ -195,6 +195,9 @@ async def set_psql_enddate(pool: Pool, ftp_path: str):
         await conn.execute("""UPDATE zip set enddate = $1 WHERE ftp_path = $2""", datetime.now(), ftp_path)
 
 
+# todo 20 минут на проверку путей из базы это многовато, надо подумать
+
+
 async def exist_on_ftp(pool: Pool, ftp_path: str, modify: str, semaphore):
     # start = time.time()
     async with semaphore:
