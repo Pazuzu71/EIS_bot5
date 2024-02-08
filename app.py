@@ -10,6 +10,8 @@ import aioftp
 import asyncpg
 from asyncpg.pool import Pool
 
+
+links = []
 # TODO вынести все константы в отдельный файлы или в переменные окружения
 host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
 
@@ -236,7 +238,7 @@ async def main():
     # Создаем темп.
     if not os.path.exists('Temp'):
         os.mkdir('Temp')
-    semaphore = asyncio.Semaphore(10)
+    semaphore = asyncio.Semaphore(20)
     # semaphore2 = asyncio.Semaphore(50)
     async with asyncpg.create_pool(**credentials) as pool:
         # Создаем таблицы.
@@ -253,6 +255,7 @@ async def main():
         await asyncio.gather(*tasks)
         # Получаем список путей с фтп.
         print('Получаем список путей с фтп.')
+
         tasks = [
             asyncio.create_task(get_ftp_list(pool, folder, semaphore)) for folder in folders
         ]
@@ -280,7 +283,7 @@ async def main():
 
 if __name__ == '__main__':
     start = time.time()
-    links = []
+
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
