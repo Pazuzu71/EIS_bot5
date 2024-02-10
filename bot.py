@@ -37,9 +37,12 @@ async def start_bot():
 
 
 async def main2():
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task((start_bot()))
-        tg.create_task(start_scheduler())
+    # async with asyncio.TaskGroup() as tg:
+    #     tg.create_task((start_bot()))
+    #     tg.create_task(start_scheduler())
+    task1 = asyncio.create_task(start_bot())
+    task2 = asyncio.create_task(start_scheduler())
+    await asyncio.gather(task1, task2)
 
 
 if __name__ == '__main__':
