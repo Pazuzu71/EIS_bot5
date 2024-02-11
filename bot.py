@@ -12,7 +12,7 @@ from app import main
 
 
 async def start_scheduler():
-    aioschedule.every().hour.at(":03").do(main)
+    aioschedule.every().hour.at(":09").do(main)
     while True:
         await aioschedule.run_pending()
         # await main()
@@ -37,17 +37,15 @@ async def start_bot():
 
 
 async def main2():
-    # async with asyncio.TaskGroup() as tg:
-    #     tg.create_task((start_bot()))
-    #     tg.create_task(start_scheduler())
-    task1 = asyncio.create_task(start_bot())
-    task2 = asyncio.create_task(start_scheduler())
-    await asyncio.gather(task1, task2)
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task((start_bot()))
+        tg.create_task(start_scheduler())
+    # task1 = asyncio.create_task(start_bot())
+    # task2 = asyncio.create_task(start_scheduler())
+    # await asyncio.gather(task1, task2)
 
 
 if __name__ == '__main__':
-    # todo поправить линки, они должны собираться здесь
-    # links = []
     try:
         asyncio.run(main2())
     except (KeyboardInterrupt, SystemExit):

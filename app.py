@@ -267,16 +267,6 @@ async def main():
             asyncio.create_task(get_data(pool, file, ftp_path, modify, semaphore)) for file, ftp_path, modify in links
         ]
         await asyncio.gather(*tasks)
-        #
-        # for task in tasks:
-        #     await task
-
-        # Пишем данные по скачанным файлам в базу.
-        # print('Пишем данные по скачанным файлам в базу')
-        # tasks = [
-        #     asyncio.create_task(insert_data(pool, file, ftp_path, modify)) for file, ftp_path, modify in links
-        # ]
-        # await asyncio.gather(*tasks)
 
         #todo возможно чистим папку темп далее
 
