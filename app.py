@@ -111,7 +111,7 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str):
                      all([item.startswith('epNotification'), not item.startswith('epNotificationCancel')]),
                      item.startswith('tenderPlan2020_'), item.startswith('epProtocol'),
                      item.startswith('cpContractSign')]):
-                print(f'Extract {item} from {file}')
+                # print(f'Extract {item} from {file}')
                 z.extract(item, 'Temp')
                 with open(f'Temp//{item}') as f:
                     src = f.read()
@@ -120,26 +120,30 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str):
                             eisdocno = re.search(r'(?<=<regNum>)\d{19}(?=</regNum>)', src)[0]
                             eispublicationdate = re.search(r'(?<=<publishDate>).+(?=</publishDate>)', src)[0]
                         except Exception as e:
-                            print(e, item)
+                            pass
+                            # print(e, item)
                     if any([item.startswith('epNotification'), item.startswith('epProtocol')]):
                         try:
                             eisdocno = re.search(r'(?<=<ns9:purchaseNumber>)\d{19}(?=</ns9:purchaseNumber>)', src)[0]
                             eispublicationdate = re.search(r'(?<=<ns9:publishDTInEIS>).+(?=</ns9:publishDTInEIS>)', src)[0]
                         except Exception as e:
-                            print(e, item)
+                            pass
+                            # print(e, item)
                     if item.startswith('tenderPlan2020'):
                         try:
                             eisdocno = re.search(r'(?<=<ns5:planNumber>)\d{18}(?=</ns5:planNumber>)', src)[0]
                             eispublicationdate = re.search(r'(?<=<ns5:publishDate>).+(?=</ns5:publishDate>)', src)[0]
                         except Exception as e:
-                            print(e, item)
+                            pass
+                            # print(e, item)
                     if item.startswith('cpContractSign'):
                         try:
                             common_info = re.search(r'(?<=<ns7:commonInfo>).+(?=</ns7:commonInfo>)', src, flags=re.DOTALL)[0]
                             eisdocno = re.search(r'(?<=<ns7:number>)\d{23}(?=</ns7:number>)', common_info)[0]
                             eispublicationdate = re.search(r'(?<=<ns7:publishDTInEIS>).+(?=</ns7:publishDTInEIS>)', common_info)[0]
                         except Exception as e:
-                            print(e, item)
+                            pass
+                            # print(e, item)
 
                     try:
                         event_data.append({
@@ -150,7 +154,8 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str):
                             'xmlname': item
                         })
                     except Exception as e:
-                        print(e)
+                        pass
+                        # print(e)
 
                 os.unlink(f'Temp//{item}')
     os.unlink(f'Temp//{file}')
@@ -165,16 +170,16 @@ async def get_data(pool: Pool, file: str, ftp_path: str, modify: str, semaphore)
         while True:
             try:
                 async with aioftp.Client().context(host, port, login, password) as client:
-                    print(f"Downloading file {file}...")
+                    # print(f"Downloading file {file}...")
                     await client.download(ftp_path, f"Temp/{file}", write_into=True)
-                    print(f"Finished downloading file {file} into Temp/{file}")
+                    # print(f"Finished downloading file {file} into Temp/{file}")
                 break
             except ConnectionResetError:
                 time.sleep(1)
-                print(f'Алярм!!! {file}', os.path.exists(f"Temp/{file}"))
+                # print(f'Алярм!!! {file}', os.path.exists(f"Temp/{file}"))
                 if os.path.exists(f"Temp/{file}"):
                     os.unlink(f"Temp/{file}")
-                print(f'ConnectionResetError при получении {file} с фтп')
+                # print(f'ConnectionResetError при получении {file} с фтп')
         await insert_data(pool, file, ftp_path, modify)
 
 
@@ -210,28 +215,29 @@ async def exist_on_ftp(pool: Pool, ftp_path: str, modify: str, semaphore):
                         info = await client.stat(ftp_path)
                     else:
                         await set_psql_enddate(pool, ftp_path)
-                        print(f'enddate обновлен, такого пути не существует: {ftp_path}')
+                        # print(f'enddate обновлен, такого пути не существует: {ftp_path}')
                         break
                     if info['modify'] != modify:
                         await set_psql_enddate(pool, ftp_path)
-                        print(f'enddate обновлен, отличается дата модификации: {ftp_path}')
+                        # print(f'enddate обновлен, отличается дата модификации: {ftp_path}')
                     # print(f'проверяли {ftp_path} ', time.time() - start)
                     break
             except ConnectionResetError:
-                print(f'ConnectionResetError при получении статистики с фтп для обновлении enddate: {ftp_path}')
+                pass
+                # print(f'ConnectionResetError при получении статистики с фтп для обновлении enddate: {ftp_path}')
 
 
 # функция-коллбэк, сообщающая о завершении задач
-def progress(context):
-    # вывод сведений о завершении работы задачи
-    print("Task completion received...")
-    print("Name of the task:%s" % context.get_name())
-    print("Wrapped coroutine object:%s" % context.get_coro())
-    print("Task is done:%s" % context.done())
-    print("Task has been cancelled:%s" % context.cancelled())
-    print("Task result:%s" % context.result())
-    print(type(context))
-    print(context)
+# def progress(context):
+#     # вывод сведений о завершении работы задачи
+#     print("Task completion received...")
+#     print("Name of the task:%s" % context.get_name())
+#     print("Wrapped coroutine object:%s" % context.get_coro())
+#     print("Task is done:%s" % context.done())
+#     print("Task has been cancelled:%s" % context.cancelled())
+#     print("Task result:%s" % context.result())
+#     print(type(context))
+#     print(context)
 
 
 async def main():
@@ -242,27 +248,27 @@ async def main():
     # semaphore2 = asyncio.Semaphore(50)
     async with asyncpg.create_pool(**credentials) as pool:
         # Создаем таблицы.
-        print('Создаем таблицы.')
+        # print('Создаем таблицы.')
         await create_psql_tables(pool)
         # Получаем все пути из базы.
-        print('Получаем все пути из базы.')
+        # print('Получаем все пути из базы.')
         psql_list = await get_psql_paths(pool)
         # Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.
-        print('Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.')
+        # print('Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.')
         tasks = [
             asyncio.create_task(exist_on_ftp(pool, ftp_path, modify, semaphore)) for ftp_path, modify in psql_list
         ]
         await asyncio.gather(*tasks)
         # Получаем список путей с фтп.
-        print('Получаем список путей с фтп.')
+        # print('Получаем список путей с фтп.')
 
         tasks = [
             asyncio.create_task(get_ftp_list(pool, folder, semaphore)) for folder in folders
         ]
         await asyncio.gather(*tasks)
-        print(f'всего файлов для скачивания {len(links)}')
+        # print(f'всего файлов для скачивания {len(links)}')
         # Скачиваем файлы с фтп ЕИС в темп.
-        print('Скачиваем файлы с фтп ЕИС в темп')
+        # print('Скачиваем файлы с фтп ЕИС в темп')
         tasks = [
             asyncio.create_task(get_data(pool, file, ftp_path, modify, semaphore)) for file, ftp_path, modify in links
         ]
@@ -272,10 +278,10 @@ async def main():
 
 
 if __name__ == '__main__':
-    start = time.time()
-
+    # start = time.time()
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        print('Ошибка, останов обновления данных в базе!')
-    print('Время работы: ', divmod(time.time() - start, 60))
+        pass
+        # print('Ошибка, останов обновления данных в базе!')
+    # print('Время работы: ', divmod(time.time() - start, 60))
