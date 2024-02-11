@@ -11,6 +11,9 @@ import asyncpg
 from asyncpg.pool import Pool
 
 
+from config import semaphore_value
+
+
 links = []
 # TODO вынести все константы в отдельный файлы или в переменные окружения
 host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
@@ -244,7 +247,7 @@ async def main():
     # Создаем темп.
     if not os.path.exists('Temp'):
         os.mkdir('Temp')
-    semaphore = asyncio.Semaphore(20)
+    semaphore = asyncio.Semaphore(semaphore_value)
     # semaphore2 = asyncio.Semaphore(50)
     async with asyncpg.create_pool(**credentials) as pool:
         # Создаем таблицы.
