@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 
 import aioschedule
@@ -12,7 +13,7 @@ from app import main
 
 
 async def start_scheduler():
-    aioschedule.every().hour.at(":09").do(main)
+    aioschedule.every().hour.at(":50").do(main)
     while True:
         await aioschedule.run_pending()
         # await main()
