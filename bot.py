@@ -8,12 +8,12 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 
 
-from config import TOKEN
+from config import TOKEN, scheduler_time
 from app import main
 
 
 async def start_scheduler():
-    aioschedule.every().hour.at(":00").do(main)
+    aioschedule.every().hour.at(scheduler_time).do(main)
     while True:
         await aioschedule.run_pending()
         # await main()
