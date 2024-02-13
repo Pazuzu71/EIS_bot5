@@ -26,6 +26,13 @@ logger.setLevel(logging.DEBUG)
 error_file = logging.FileHandler('error.log', 'w', encoding='utf-8')
 # Устанавливаем хэндлеру уровень `DEBUG`
 error_file.setLevel(logging.DEBUG)
+# Инициализируем форматтер
+formatter_1 = logging.Formatter(
+    fmt='[%(asctime)s] #%(levelname)-8s %(filename)s:'
+        '%(lineno)d - %(name)s:%(funcName)s - %(message)s'
+)
+# Определяем форматирование логов в хэндлере
+error_file.setFormatter(formatter_1)
 # Добавляем хэндлер в логгер
 logger.addHandler(error_file)
 
