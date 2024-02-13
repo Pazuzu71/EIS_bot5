@@ -188,8 +188,14 @@ async def get_data(pool: Pool, file: str, ftp_path: str, modify: str, semaphore)
 
 async def get_ftp_list(pool: Pool, folder: str, semaphore):
     async with semaphore:
-        async with aioftp.Client.context(host, port, login, password) as client:
-            ftp_list = await client.list(folder, recursive=False)
+        while True:
+            try:
+                async with aioftp.Client.context(host, port, login, password) as client:
+                    ftp_list = await client.list(folder, recursive=False)
+                break
+            except ConnectionResetError:
+                pass
+
         for path, info in ftp_list:
             exist_in_db = await exist_in_psql_db(pool, str(path), info['modify'])
             if info['size'] != '22' and not exist_in_db and str(path).endswith('.zip'):
@@ -248,30 +254,29 @@ async def main():
     if not os.path.exists('Temp'):
         os.mkdir('Temp')
     semaphore = asyncio.Semaphore(semaphore_value)
-    # semaphore2 = asyncio.Semaphore(50)
     async with asyncpg.create_pool(**credentials) as pool:
         # Создаем таблицы.
-        # print('Создаем таблицы.')
+        print('Создаем таблицы.')
         await create_psql_tables(pool)
         # Получаем все пути из базы.
-        # print('Получаем все пути из базы.')
+        print('Получаем все пути из базы.')
         psql_list = await get_psql_paths(pool)
         # Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.
-        # print('Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.')
+        print('Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.')
         tasks = [
             asyncio.create_task(exist_on_ftp(pool, ftp_path, modify, semaphore)) for ftp_path, modify in psql_list
         ]
         await asyncio.gather(*tasks)
         # Получаем список путей с фтп.
-        # print('Получаем список путей с фтп.')
+        print('Получаем список путей с фтп.')
 
         tasks = [
             asyncio.create_task(get_ftp_list(pool, folder, semaphore)) for folder in folders
         ]
         await asyncio.gather(*tasks)
-        # print(f'всего файлов для скачивания {len(links)}')
+        print(f'всего файлов для скачивания {len(links)}')
         # Скачиваем файлы с фтп ЕИС в темп.
-        # print('Скачиваем файлы с фтп ЕИС в темп')
+        print('Скачиваем файлы с фтп ЕИС в темп')
         tasks = [
             asyncio.create_task(get_data(pool, file, ftp_path, modify, semaphore)) for file, ftp_path, modify in links
         ]
