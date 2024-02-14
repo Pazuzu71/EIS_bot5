@@ -3,6 +3,7 @@ import os
 import re
 import zipfile
 import time
+import logging
 from datetime import datetime
 
 
@@ -13,6 +14,30 @@ from asyncpg.pool import Pool
 
 from config import semaphore_value
 
+
+# Настраиваем базовую конфигурацию логирования
+# logging.basicConfig(
+#     format='[%(asctime)s] #%(levelname)-8s %(filename)s: %(lineno)d - %(name)s:%(funcName)s - %(message)s',
+#     # level=logging.DEBUG,
+#     # filename='mylog.log'
+# )
+# # Инициализируем логгер модуля
+# logger = logging.getLogger(__name__)
+# # Устанавливаем логгеру уровень `DEBUG`
+# logger.setLevel(logging.DEBUG)
+# # Инициализируем хэндлер, который будет писать логи в файл `error.log`
+# error_file = logging.FileHandler('error.log', 'w', encoding='utf-8')
+# # Устанавливаем хэндлеру уровень `DEBUG`
+# error_file.setLevel(logging.DEBUG)
+# # Инициализируем форматтер
+# formatter_1 = logging.Formatter(
+#     fmt='[%(asctime)s] #%(levelname)-8s %(filename)s:'
+#         '%(lineno)d - %(name)s:%(funcName)s - %(message)s'
+# )
+# # Определяем форматирование логов в хэндлере
+# error_file.setFormatter(formatter_1)
+# # Добавляем хэндлер в логгер
+# logger.addHandler(error_file)
 
 links = []
 # TODO вынести все константы в отдельный файлы или в переменные окружения
@@ -236,19 +261,6 @@ async def exist_on_ftp(pool: Pool, ftp_path: str, modify: str, semaphore):
                 # print(f'ConnectionResetError при получении статистики с фтп для обновлении enddate: {ftp_path}')
 
 
-# функция-коллбэк, сообщающая о завершении задач
-# def progress(context):
-#     # вывод сведений о завершении работы задачи
-#     print("Task completion received...")
-#     print("Name of the task:%s" % context.get_name())
-#     print("Wrapped coroutine object:%s" % context.get_coro())
-#     print("Task is done:%s" % context.done())
-#     print("Task has been cancelled:%s" % context.cancelled())
-#     print("Task result:%s" % context.result())
-#     print(type(context))
-#     print(context)
-
-
 async def main():
     # Создаем темп.
     if not os.path.exists('Temp'):
@@ -256,6 +268,7 @@ async def main():
     semaphore = asyncio.Semaphore(semaphore_value)
     async with asyncpg.create_pool(**credentials) as pool:
         # Создаем таблицы.
+        # logger.debug('Создаем таблицы.')
         print('Создаем таблицы.')
         await create_psql_tables(pool)
         # Получаем все пути из базы.
@@ -286,10 +299,7 @@ async def main():
 
 
 if __name__ == '__main__':
-    # start = time.time()
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         pass
-        # print('Ошибка, останов обновления данных в базе!')
-    # print('Время работы: ', divmod(time.time() - start, 60))
