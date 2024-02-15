@@ -12,7 +12,7 @@ import asyncpg
 from asyncpg.pool import Pool
 
 
-from config import semaphore_value
+from config import semaphore_value, credentials
 
 
 # Настраиваем базовую конфигурацию логирования
@@ -60,16 +60,6 @@ folders = [
     '/fcs_regions/Tulskaja_obl/contractprojects/currMonth',
     '/fcs_regions/Tulskaja_obl/contractprojects/prevMonth',
 ]
-credentials = dict(
-    host='127.0.0.1',
-    port=5432,
-    user='db_user',
-    password='myPassword',
-    database='psql_db',
-    min_size=5,
-    max_size=50,
-    max_inactive_connection_lifetime=0
-)
 
 
 async def create_psql_tables(pool: Pool):

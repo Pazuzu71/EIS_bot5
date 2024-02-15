@@ -8,9 +8,11 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import asyncpg
+from asyncpg.pool import Pool
 
 
-from config import TOKEN
+from config import TOKEN, credentials
 from app import main
 
 
@@ -58,6 +60,8 @@ async def start_bot():
     async def echo(msg: Message):
         logger.info('это эхо хэндлер')
         await msg.reply(msg.text)
+        async with asyncpg.create_pool(**credentials) as pool:
+            pass
 
     scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
     scheduler.add_job(main, trigger='interval', minutes=60, next_run_time=datetime.now())
