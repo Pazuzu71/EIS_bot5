@@ -40,6 +40,28 @@ error_file.setFormatter(formatter_1)
 logger.addHandler(error_file)
 
 
+async def find_psql_tenderPlan2020(pool: Pool, eisdocno: str) -> str:
+    conn = None
+    # while True:
+    try:
+        async with pool.acquire() as conn:
+            result = await conn.fetch(
+                """
+                SELECT ftp_path, eispublicationdate
+                FROM zip 
+                INNER JOIN xml on zip.zip_id = xml.zip_id 
+                WHERE zip.enddate IS NULL AND xml.eisdocno = $1;
+                """,
+                eisdocno
+            )
+            return result
+    except Exception as e:
+        print(f"An error occurred: {e}", Exception)
+    finally:
+        if conn:
+            await pool.release(conn)
+
+
 async def start_bot():
     logger.debug('Запуск бота')
     bot = Bot(token=TOKEN)
@@ -55,13 +77,15 @@ async def start_bot():
     async def get_over_here(msg: Message):
         logger.info('Перехвачено хэнлером, определяющим номер ЕИС 18 цифр')
         await msg.answer('да, это тот номер, и дальше понеслось!')
+        async with asyncpg.create_pool(**credentials) as pool:
+            documents = await find_psql_tenderPlan2020(pool, msg.text)
+            if not documents:
+                await msg.reply(f'В базе нет информации по плану-графику с реестровым номером {msg.text}')
 
     @dp.message()
     async def echo(msg: Message):
         logger.info('это эхо хэндлер')
         await msg.reply(msg.text)
-        async with asyncpg.create_pool(**credentials) as pool:
-            pass
 
     scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
     scheduler.add_job(main, trigger='interval', minutes=60, next_run_time=datetime.now())
