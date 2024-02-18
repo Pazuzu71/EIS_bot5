@@ -14,7 +14,7 @@ import pytz
 from aiogram import Bot, Dispatcher
 from aiogram import F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputFile, FSInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -47,6 +47,18 @@ error_file.setFormatter(formatter_1)
 logger.addHandler(error_file)
 
 
+def kb_creator(documents):
+    documents = sorted([(dt.astimezone(tz=pytz.timezone('Europe/Moscow')), id_) for dt, id_ in documents], reverse=True)
+    print(documents)
+    buttons = [
+        InlineKeyboardButton(text=document[0].strftime('%Y-%m-%d %H:%M'),
+                             callback_data=f'document_{document[1]}') for document in documents
+    ]
+    kb_builder = InlineKeyboardBuilder()
+    kb_builder.row(width=3, *buttons)
+    return kb_builder.as_markup()
+
+
 async def get_psql_data(pool: Pool, id_: int):
     conn = None
     try:
@@ -70,7 +82,7 @@ async def get_psql_data(pool: Pool, id_: int):
             await pool.release(conn)
 
 
-async def find_psql_tenderPlan2020_id(pool: Pool, eisdocno: str):
+async def find_psql_document_id(pool: Pool, eisdocno: str):
     conn = None
     # while True:
     try:
@@ -120,8 +132,8 @@ async def worker(queue: asyncio.Queue, bot: Bot):
 
 
 async def start_bot():
-    logger.debug('Запуск бота')
-
+    logger.info('Запуск бота')
+    pool = await asyncpg.create_pool(**credentials)
     queue = asyncio.Queue(maxsize=100)
     bot = Bot(token=TOKEN)
     dp = Dispatcher()
@@ -134,29 +146,34 @@ async def start_bot():
     @dp.message(lambda msg: re.fullmatch(r'\d{18}', msg.text))
     async def get_over_here(msg: Message):
         logger.info('Перехвачено хэнлером, определяющим номер ЕИС 18 цифр')
-        await msg.answer('да, это тот номер, и дальше понеслось!')
-        async with asyncpg.create_pool(**credentials) as pool:
-            documents = await find_psql_tenderPlan2020_id(pool, msg.text)
-            if not documents:
-                await msg.reply(f'В базе нет информации по плану-графику с реестровым номером {msg.text}')
-            else:
-                documents = sorted([(dt.astimezone(tz=pytz.timezone('Europe/Moscow')), id_) for dt, id_ in documents], reverse=True)
-                print(documents)
-                buttons = [
-                    InlineKeyboardButton(text=document[0].strftime('%Y-%m-%d %H:%M'),
-                                         callback_data=f'tenderPlan2020_{document[1]}') for document in documents
-                ]
-                kb_builder = InlineKeyboardBuilder()
-                kb_builder.row(width=3, *buttons)
-                kb = kb_builder.as_markup()
-                await msg.reply(text=msg.text, reply_markup=kb)
+        # async with asyncpg.create_pool(**credentials) as pool:
+        documents = await find_psql_document_id(pool, msg.text)
+        if not documents:
+            await msg.reply(f'В базе нет информации по плану-графику с реестровым номером {msg.text}')
+        else:
+            kb = kb_creator(documents)
+            await msg.reply(text=msg.text, reply_markup=kb)
 
-    @dp.callback_query(F.data.startswith('tenderPlan2020_'))
-    async def get_tenderPlan2020(callback: CallbackQuery, bot: Bot):
+    @dp.message(lambda msg: re.fullmatch(r'\d{23}', msg.text))
+    async def get_over_here(msg: Message):
+        logger.info('Перехвачено хэнлером, определяющим номер ЕИС 19 цифр')
+        documents = await find_psql_document_id(pool, msg.text)
+        if not documents:
+            await msg.reply(f'В базе нет информации по проекту контракта с реестровым номером {msg.text}')
+        if len(documents) == 1:
+            id_ = documents[0][-1]
+            ftp_path, xmlname = await get_psql_data(pool, int(id_))
+            await queue.put((msg.from_user.id, msg.message_id, ftp_path, xmlname))
+        else:
+            kb = kb_creator(documents)
+            await msg.reply(text=msg.text, reply_markup=kb)
+
+    @dp.callback_query(F.data.startswith('document_'))
+    async def get_document(callback: CallbackQuery):
         id_ = callback.data.split('_')[-1]
         await callback.answer(text=f'id файла в базе {id_}')
-        async with asyncpg.create_pool(**credentials) as pool:
-            ftp_path, xmlname = await get_psql_data(pool, int(id_))
+        # async with asyncpg.create_pool(**credentials) as pool:
+        ftp_path, xmlname = await get_psql_data(pool, int(id_))
         await queue.put((callback.from_user.id, callback.message.message_id, ftp_path, xmlname))
 
     @dp.message()
@@ -165,7 +182,7 @@ async def start_bot():
         await msg.reply(msg.text)
 
     scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
-    scheduler.add_job(main, trigger='interval', minutes=60, next_run_time=datetime.now())
+    scheduler.add_job(main, args=[pool], trigger='interval', minutes=60, next_run_time=datetime.now())
     scheduler.start()
 
     # await worker(queue, bot)
@@ -175,7 +192,8 @@ async def start_bot():
     # await dp.start_polling(bot)
     async with asyncio.TaskGroup() as tg:
         tg.create_task(dp.start_polling(bot))
-        tg.create_task(worker(queue, bot))
+        tg.create_task(worker(queue, bot), name='worker-0')
+        tg.create_task(worker(queue, bot), name='worker-1')
 
 
 if __name__ == '__main__':
