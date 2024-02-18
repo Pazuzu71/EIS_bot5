@@ -12,36 +12,36 @@ import asyncpg
 from asyncpg.pool import Pool
 
 
-from config import semaphore_value, credentials
+from config import semaphore_value, credentials, host, port, login, password
 
 
 # Настраиваем базовую конфигурацию логирования
-# logging.basicConfig(
-#     format='[%(asctime)s] #%(levelname)-8s %(filename)s: %(lineno)d - %(name)s:%(funcName)s - %(message)s',
-#     # level=logging.DEBUG,
-#     # filename='mylog.log'
-# )
-# # Инициализируем логгер модуля
-# logger = logging.getLogger(__name__)
-# # Устанавливаем логгеру уровень `DEBUG`
-# logger.setLevel(logging.DEBUG)
-# # Инициализируем хэндлер, который будет писать логи в файл `error.log`
-# error_file = logging.FileHandler('error.log', 'w', encoding='utf-8')
-# # Устанавливаем хэндлеру уровень `DEBUG`
-# error_file.setLevel(logging.DEBUG)
-# # Инициализируем форматтер
-# formatter_1 = logging.Formatter(
-#     fmt='[%(asctime)s] #%(levelname)-8s %(filename)s:'
-#         '%(lineno)d - %(name)s:%(funcName)s - %(message)s'
-# )
-# # Определяем форматирование логов в хэндлере
-# error_file.setFormatter(formatter_1)
-# # Добавляем хэндлер в логгер
-# logger.addHandler(error_file)
+logging.basicConfig(
+    format='[%(asctime)s] #%(levelname)-8s %(filename)s: %(lineno)d - %(name)s:%(funcName)s - %(message)s',
+    level=logging.INFO,
+)
+# Инициализируем логгер модуля
+logger = logging.getLogger(__name__)
+# Устанавливаем логгеру уровень `DEBUG`
+logger.setLevel(logging.DEBUG)
+# Инициализируем хэндлер, который будет писать логи в файл `error.log`
+error_file = logging.FileHandler('error.log', 'a', encoding='utf-8')
+# Устанавливаем хэндлеру уровень `DEBUG`
+error_file.setLevel(logging.DEBUG)
+# Инициализируем форматтер
+formatter_1 = logging.Formatter(
+    fmt='[%(asctime)s] #%(levelname)-8s %(filename)s:'
+        '%(lineno)d - %(name)s:%(funcName)s - %(message)s'
+)
+# Определяем форматирование логов в хэндлере
+error_file.setFormatter(formatter_1)
+# Добавляем хэндлер в логгер
+logger.addHandler(error_file)
+
 
 links = []
 # TODO вынести все константы в отдельный файлы или в переменные окружения
-host, port, login, password = 'ftp.zakupki.gov.ru', 21, 'free', 'free'
+
 
 folders = [
     '/fcs_regions/Tulskaja_obl/contracts',
@@ -82,6 +82,7 @@ async def create_psql_tables(pool: Pool):
                 eispublicationdate timestamp with time zone,
                 xmlname VARCHAR)
         ''')
+
     await pool.release(conn)
 
 
@@ -96,7 +97,6 @@ async def insert_psql_zip(pool: Pool, ftp_path: str, modify: str):
 
 async def insert_psql_xml(pool: Pool, row: dict):
     """Добавление записи в таблицу xml"""
-    # TODO проверить конвертацию поля eispublicationdate в зонах времени
     conn = await pool.acquire()
     # todo что будет, если нвйдутся две строчки без даты
     zip_id = await conn.fetchval("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
@@ -116,7 +116,12 @@ async def exist_in_psql_db(pool: Pool, ftp_path: str, modify: str):
 
 async def get_psql_paths(pool: Pool):
     async with pool.acquire() as conn:
-        return await conn.fetch("""SELECT ftp_path, modify FROM zip WHERE enddate IS NULL""")
+        # t = await conn.execute('''
+        #                 SHOW TIME ZONE;
+        #         ''')
+        # print('tine zone = ', t)
+        psql_list = await conn.fetch("""SELECT ftp_path, modify FROM zip WHERE enddate IS NULL""")
+    return psql_list
 
 
 async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str):
@@ -258,28 +263,33 @@ async def main():
     semaphore = asyncio.Semaphore(semaphore_value)
     async with asyncpg.create_pool(**credentials) as pool:
         # Создаем таблицы.
-        # logger.debug('Создаем таблицы.')
-        print('Создаем таблицы.')
+        logger.debug('Создаем таблицы.')
+        # print('Создаем таблицы.')
         await create_psql_tables(pool)
         # Получаем все пути из базы.
-        print('Получаем все пути из базы.')
+        logger.info('Получаем все пути из базы.')
+        # print('Получаем все пути из базы.')
         psql_list = await get_psql_paths(pool)
         # Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.
-        print('Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.')
+        # print('Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.')
+        logger.info('Проверяем наличие эти путей на фтп. Если их нет, ставим дату окончания.')
         tasks = [
             asyncio.create_task(exist_on_ftp(pool, ftp_path, modify, semaphore)) for ftp_path, modify in psql_list
         ]
         await asyncio.gather(*tasks)
         # Получаем список путей с фтп.
-        print('Получаем список путей с фтп.')
+        logger.info('Получаем список путей с фтп.')
+        # print('Получаем список путей с фтп.')
 
         tasks = [
             asyncio.create_task(get_ftp_list(pool, folder, semaphore)) for folder in folders
         ]
         await asyncio.gather(*tasks)
-        print(f'всего файлов для скачивания {len(links)}')
+        logger.info(f'всего файлов для скачивания {len(links)}')
+        # print(f'всего файлов для скачивания {len(links)}')
         # Скачиваем файлы с фтп ЕИС в темп.
-        print('Скачиваем файлы с фтп ЕИС в темп')
+        # print('Скачиваем файлы с фтп ЕИС в темп')
+        logger.info('Скачиваем файлы с фтп ЕИС в темп')
         tasks = [
             asyncio.create_task(get_data(pool, file, ftp_path, modify, semaphore)) for file, ftp_path, modify in links
         ]
