@@ -132,7 +132,9 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str, semapho
             if item.endswith('.xml') and any(
                     [item.startswith('contractProcedure_'), item.startswith('contract_'),
                      all([item.startswith('epNotification'), not item.startswith('epNotificationCancel')]),
-                     item.startswith('tenderPlan2020_'), item.startswith('epProtocol'),
+                     item.startswith('tenderPlan2020_'),
+                     item.startswith('epProtocol'),
+                     # all([item.startswith('epProtocol'), not item.startswith('epProtocolCancel'), not item.startswith('epProtocolDeviation')]),
                      item.startswith('cpContractSign')]):
                 # print(f'Extract {item} from {file}')
                 z.extract(item, 'Temp')
