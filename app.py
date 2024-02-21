@@ -245,9 +245,6 @@ async def set_psql_enddate(pool: Pool, ftp_path: str):
             await pool.release(conn)
 
 
-# todo exist_on_ftp 20 минут на проверку путей из базы это многовато, надо подумать
-
-
 async def exist_on_ftp(pool: Pool, psql_ftp_path: str, psql_modify: str, semaphore):
     # start = time.time()
     async with semaphore:
@@ -303,6 +300,7 @@ async def main(pool: Pool):
     # logger.info(links)
     logger.info('Проверяем наличие этих путей на фтп. Если их нет, ставим дату окончания.')
     t_start = time.monotonic()
+
     tasks = [
         asyncio.create_task(exist_on_ftp2(pool, links, psql_ftp_path, psql_modify, semaphore))
         for psql_ftp_path, psql_modify in psql_list
@@ -313,10 +311,19 @@ async def main(pool: Pool):
     logger.info(f'всего файлов для скачивания {len([link for link in links if link[-1] == 1])}')
 
     logger.info('Скачиваем файлы с фтп ЕИС в темп')
-    tasks = [
-        asyncio.create_task(get_data(pool, file, ftp_path, modify, semaphore)) for file, ftp_path, modify, flag in links if flag == 1
-    ]
-    await asyncio.gather(*tasks)
+    limit_param = 5
+    n, k = divmod(len(links), limit_param)
+    # print(n, k)
+    new_arr = []
+    for i in range(n):
+        new_arr.append(links[:limit_param])
+        links = links[limit_param:]
+    new_arr.append(links)
+    for temp in new_arr:
+        tasks = [
+            asyncio.create_task(get_data(pool, file, ftp_path, modify, semaphore)) for file, ftp_path, modify, flag in temp if flag == 1
+        ]
+        await asyncio.gather(*tasks)
     logger.info('Новые пути к файлам добавлены в базу')
 
 
