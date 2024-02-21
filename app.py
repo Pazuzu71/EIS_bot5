@@ -313,7 +313,6 @@ async def main(pool: Pool):
     logger.info('Скачиваем файлы с фтп ЕИС в темп')
     limit_param = 5
     n, k = divmod(len(links), limit_param)
-    # print(n, k)
     new_arr = []
     for i in range(n):
         new_arr.append(links[:limit_param])
