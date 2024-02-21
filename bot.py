@@ -48,7 +48,10 @@ logger.addHandler(error_file)
 
 
 def kb_creator(documents):
-    documents = sorted([(dt.astimezone(tz=pytz.timezone('Europe/Moscow')), id_) for dt, id_ in documents], reverse=True)
+    documents = sorted([
+        (eispublicationdate.astimezone(tz=pytz.timezone('Europe/Moscow')), xml_id)
+        for eispublicationdate, xml_id, xmlname in documents
+    ], reverse=True)
     print(documents)
     buttons = [
         InlineKeyboardButton(text=document[0].strftime('%Y-%m-%d %H:%M'),
@@ -72,7 +75,6 @@ async def get_psql_data(pool: Pool, id_: int):
                 """,
                 id_
             )
-            # print('result', result, id_)
             return result
 
     except Exception as e:
@@ -89,7 +91,7 @@ async def find_psql_document_id(pool: Pool, eisdocno: str):
         async with pool.acquire() as conn:
             result = await conn.fetch(
                 """
-                SELECT eispublicationdate, xml_id
+                SELECT eispublicationdate, xml_id, xmlname
                 FROM zip 
                 INNER JOIN xml on zip.zip_id = xml.zip_id 
                 WHERE zip.enddate IS NULL AND xml.eisdocno = $1;
@@ -107,25 +109,31 @@ async def find_psql_document_id(pool: Pool, eisdocno: str):
 async def worker(queue: asyncio.Queue, bot: Bot):
     while True:
         user_id, message_id, ftp_path, xmlname = await queue.get()
-        await bot.send_message(chat_id=user_id, text=f'{user_id}, {message_id}, {ftp_path}, {xmlname}')
+        # await bot.send_message(chat_id=user_id, text=f'{user_id}, {message_id}, {ftp_path}, {xmlname}')
         file = ftp_path.split('/')[-1]
         if all([user_id, message_id, ftp_path, xmlname]):
             while True:
                 client = None
+                dt = datetime.now().strftime('%Y_%m_%d_%H_%M_%S_%f')
                 try:
                     async with aioftp.Client().context(host, port, login, password) as client:
-                        await client.download(ftp_path, f"Temp/{user_id}/{file}", write_into=True)
-                    with zipfile.ZipFile(f"Temp/{user_id}/{file}") as z:
-                        z.extract(xmlname, f"Temp/{user_id}/")
-                    sending_file = FSInputFile(f"Temp/{user_id}/{xmlname}")
+                        await client.download(ftp_path, f"Temp/{user_id}/{dt}/{file}", write_into=True)
+                    with zipfile.ZipFile(f"Temp/{user_id}/{dt}/{file}") as z:
+                        z.extract(xmlname, f"Temp/{user_id}/{dt}/")
+                    sending_file = FSInputFile(f"Temp/{user_id}/{dt}/{xmlname}")
                     await bot.send_document(chat_id=user_id, document=sending_file, reply_to_message_id=message_id)
                     time.sleep(1)
-                    os.unlink(f"Temp/{user_id}/{file}")
-                    os.unlink(f"Temp/{user_id}/{xmlname}")
+
+                    os.unlink(f"Temp/{user_id}/{dt}/{file}")
+                    os.unlink(f"Temp/{user_id}/{dt}/{xmlname}")
+                    os.rmdir(f"Temp/{user_id}/{dt}/")
                     break
                 except ConnectionResetError:
-                    if os.path.exists(f"Temp/{user_id}/{file}"):
-                        os.unlink(f"Temp/{user_id}/{file}")
+                    if os.path.exists(f"Temp/{user_id}/{dt}/{file}"):
+                        os.unlink(f"Temp/{user_id}/{dt}/{file}")
+                    if os.path.exists(f"Temp/{user_id}/{dt}/{xmlname}"):
+                        os.unlink(f"Temp/{user_id}/{dt}/{xmlname}")
+                        os.rmdir(f"Temp/{user_id}/{dt}/")
                 finally:
                     if client:
                         client.close()
@@ -143,9 +151,46 @@ async def start_bot():
         logger.info('это старт хэндлер')
         await msg.answer('это эхо')
 
+    @dp.message(lambda msg: re.fullmatch(r'\d{19}', msg.text))
+    async def get_over_here(msg: Message):
+        logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 19 цифр: {msg.text}')
+        # async with asyncpg.create_pool(**credentials) as pool:
+        documents = await find_psql_document_id(pool, msg.text)
+        if not documents:
+            await msg.reply(f'В базе нет информации по плану-графику с реестровым номером {msg.text}')
+        else:
+            notifications, protocols, contracts, contract_procedures = [], [], [], []
+            for document in documents:
+                xmlname: str = document[2]
+                match xmlname:
+                    case s if s.startswith('epNotification'):
+                        notifications.append(document)
+                    case s if s.startswith('epProtocol'):
+                        protocols.append(document)
+                    case s if s.startswith('contract_'):
+                        contracts.append(document)
+                    case s if s.startswith('contractProcedure_'):
+                        contract_procedures.append(document)
+            # Извещения
+            if notifications:
+                kb = kb_creator(notifications)
+                await msg.reply(text=f'Извещения: {msg.text}', reply_markup=kb)
+            # Протоколы
+            if protocols:
+                kb = kb_creator(protocols)
+                await msg.reply(text=f'Протоколы: {msg.text}', reply_markup=kb)
+            # СоК
+            if contracts:
+                kb = kb_creator(contracts)
+                await msg.reply(text=f'Сведения о контракте (СоК): {msg.text}', reply_markup=kb)
+            # СоИ
+            if contract_procedures:
+                kb = kb_creator(contract_procedures)
+                await msg.reply(text=f'Сведения об исполнении (СоИ): {msg.text}', reply_markup=kb)
+
     @dp.message(lambda msg: re.fullmatch(r'\d{18}', msg.text))
     async def get_over_here(msg: Message):
-        logger.info('Перехвачено хэнлером, определяющим номер ЕИС 18 цифр')
+        logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 18 цифр: {msg.text}')
         # async with asyncpg.create_pool(**credentials) as pool:
         documents = await find_psql_document_id(pool, msg.text)
         if not documents:
@@ -156,12 +201,12 @@ async def start_bot():
 
     @dp.message(lambda msg: re.fullmatch(r'\d{23}', msg.text))
     async def get_over_here(msg: Message):
-        logger.info('Перехвачено хэнлером, определяющим номер ЕИС 19 цифр')
+        logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 19 цифр: {msg.text}')
         documents = await find_psql_document_id(pool, msg.text)
         if not documents:
             await msg.reply(f'В базе нет информации по проекту контракта с реестровым номером {msg.text}')
         if len(documents) == 1:
-            id_ = documents[0][-1]
+            id_ = documents[0][1]
             ftp_path, xmlname = await get_psql_data(pool, int(id_))
             await queue.put((msg.from_user.id, msg.message_id, ftp_path, xmlname))
         else:

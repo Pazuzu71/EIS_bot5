@@ -11,7 +11,7 @@ import aioftp
 from asyncpg.pool import Pool
 
 
-from config import semaphore_value, host, port, login, password
+from config import semaphore_value, host, port, login, password, folders
 
 
 # Настраиваем базовую конфигурацию логирования
@@ -36,29 +36,6 @@ formatter_1 = logging.Formatter(
 error_file.setFormatter(formatter_1)
 # Добавляем хэндлер в логгер
 logger.addHandler(error_file)
-
-
-
-# TODO вынести все константы в отдельный файлы или в переменные окружения
-
-
-folders = [
-    '/fcs_regions/Tulskaja_obl/contracts',
-    '/fcs_regions/Tulskaja_obl/contracts/currMonth',
-    '/fcs_regions/Tulskaja_obl/contracts/prevMonth',
-    '/fcs_regions/Tulskaja_obl/notifications',
-    '/fcs_regions/Tulskaja_obl/notifications/currMonth',
-    '/fcs_regions/Tulskaja_obl/notifications/prevMonth',
-    '/fcs_regions/Tulskaja_obl/plangraphs2020',
-    '/fcs_regions/Tulskaja_obl/plangraphs2020/currMonth',
-    '/fcs_regions/Tulskaja_obl/plangraphs2020/prevMonth',
-    '/fcs_regions/Tulskaja_obl/protocols',
-    '/fcs_regions/Tulskaja_obl/protocols/currMonth',
-    '/fcs_regions/Tulskaja_obl/protocols/prevMonth',
-    '/fcs_regions/Tulskaja_obl/contractprojects',
-    '/fcs_regions/Tulskaja_obl/contractprojects/currMonth',
-    '/fcs_regions/Tulskaja_obl/contractprojects/prevMonth',
-]
 
 
 async def create_psql_tables(pool: Pool):
