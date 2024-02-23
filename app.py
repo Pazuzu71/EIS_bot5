@@ -3,7 +3,6 @@ import os
 import re
 import zipfile
 import time
-import logging
 from datetime import datetime
 
 
@@ -11,95 +10,13 @@ import aioftp
 from asyncpg.pool import Pool
 
 
-from config import semaphore_value, host, port, login, password, folders
+from log.funcs import create_logger
+from config import semaphore_value, host, port, login, password, folders, limit_param
+from sql.funcs import create_psql_tables, insert_psql_zip, insert_psql_xml, get_psql_paths, set_psql_enddate
+from sql.funcs import exist_in_psql_db
 
 
-# Настраиваем базовую конфигурацию логирования
-logging.basicConfig(
-    format='[%(asctime)s] #%(levelname)-8s %(filename)s: %(lineno)d - %(name)s:%(funcName)s - %(message)s',
-    level=logging.INFO,
-)
-# Инициализируем логгер модуля
-logger = logging.getLogger(__name__)
-# Устанавливаем логгеру уровень `DEBUG`
-logger.setLevel(logging.DEBUG)
-# Инициализируем хэндлер, который будет писать логи в файл `error.log`
-error_file = logging.FileHandler('error.log', 'a', encoding='utf-8')
-# Устанавливаем хэндлеру уровень `DEBUG`
-error_file.setLevel(logging.DEBUG)
-# Инициализируем форматтер
-formatter_1 = logging.Formatter(
-    fmt='[%(asctime)s] #%(levelname)-8s %(filename)s:'
-        '%(lineno)d - %(name)s:%(funcName)s - %(message)s'
-)
-# Определяем форматирование логов в хэндлере
-error_file.setFormatter(formatter_1)
-# Добавляем хэндлер в логгер
-logger.addHandler(error_file)
-
-
-async def create_psql_tables(pool: Pool):
-    conn = await pool.acquire()
-    await conn.execute('''
-            create table if not exists zip
-            (
-                zip_id SERIAL PRIMARY KEY,
-                ftp_path VARCHAR,
-                modify VARCHAR,
-                creationdate timestamp,
-                enddate timestamp)
-    ''')
-    await conn.execute('''
-                create table if not exists xml
-                (
-                zip_id INTEGER REFERENCES zip (zip_id) ON DELETE CASCADE,
-                xml_id SERIAL PRIMARY KEY,
-                eisdocno VARCHAR,
-                eispublicationdate timestamp with time zone,
-                xmlname VARCHAR)
-        ''')
-    await pool.release(conn)
-
-
-async def insert_psql_zip(pool: Pool, ftp_path: str, modify: str):
-    """Добавление записи в таблицу zip"""
-    conn = await pool.acquire()
-    await conn.execute('''INSERT INTO zip (ftp_path, modify, creationdate) VALUES ($1, $2, $3)''',
-                       ftp_path, modify, datetime.now()
-                       )
-    await pool.release(conn)
-
-
-async def insert_psql_xml(pool: Pool, row: dict):
-    """Добавление записи в таблицу xml"""
-    conn = await pool.acquire()
-    # todo что будет, если нвйдутся две строчки без даты
-    zip_id = await conn.fetchval("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
-                                 row['ftp_path'], row['modify'], column=0)
-    await conn.execute("""INSERT INTO xml (zip_id, eisdocno, eispublicationdate, xmlname) VALUES ($1, $2, $3, $4)""",
-                       zip_id, row['eisdocno'], row['eispublicationdate'], row['xmlname'])
-    await pool.release(conn)
-
-
-async def exist_in_psql_db(pool: Pool, ftp_path: str, modify: str):
-    conn = await pool.acquire()
-    is_exist = await conn.fetch("""SELECT * FROM zip WHERE ftp_path = $1 AND modify = $2 AND enddate IS NULL""",
-                                ftp_path, modify)
-    await pool.release(conn)
-    return is_exist
-
-
-async def get_psql_paths(pool: Pool):
-    conn = None
-    try:
-        async with pool.acquire() as conn:
-            psql_list = await conn.fetch("""SELECT ftp_path, modify FROM zip WHERE enddate IS NULL""")
-        return psql_list
-    except Exception as e:
-        logger.exception(e)
-    finally:
-        if conn:
-            await pool.release(conn)
+logger = create_logger(__name__)
 
 
 async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str, semaphore):
@@ -198,52 +115,16 @@ async def get_ftp_list(pool: Pool, links: list, folder: str, semaphore):
             exist_in_db = await exist_in_psql_db(pool, str(path), info['modify'])
             if info['size'] != '22' and not exist_in_db and str(path).endswith('.zip'):
                 # TODO текущий и прошлый месяцы будут всегда, года вынести в отдельный параметр
-                if any(sub_path in str(path) for sub_path in ['currMonth', 'prevMonth'] + ['2022', '2023']):
+                if any(sub_path in str(path) for sub_path in ['currMonth', 'prevMonth'] + ['2022', '2023', '2024']):
                     links.append(
                         (str(path).split('/')[-1], str(path), info['modify'], 1)
                     )
             elif info['size'] != '22' and str(path).endswith('.zip'):
                 # TODO текущий и прошлый месяцы будут всегда, года вынести в отдельный параметр
-                if any(sub_path in str(path) for sub_path in ['currMonth', 'prevMonth'] + ['2022', '2023']):
+                if any(sub_path in str(path) for sub_path in ['currMonth', 'prevMonth'] + ['2022', '2023', '2024']):
                     links.append(
                         (str(path).split('/')[-1], str(path), info['modify'], 0)
                     )
-
-
-async def set_psql_enddate(pool: Pool, ftp_path: str):
-    conn = None
-    try:
-        async with pool.acquire() as conn:
-            await conn.execute("""UPDATE zip set enddate = $1 WHERE ftp_path = $2""", datetime.now(), ftp_path)
-    except Exception as e:
-        logger.exception(e)
-    finally:
-        if conn:
-            await pool.release(conn)
-
-
-async def exist_on_ftp(pool: Pool, psql_ftp_path: str, psql_modify: str, semaphore):
-    # start = time.time()
-    async with semaphore:
-        while True:
-            client = None
-            try:
-                async with aioftp.Client.context(host, port, login, password) as client:
-                    ftp_path_exists = await client.exists(psql_ftp_path)
-                    if ftp_path_exists:
-                        info = await client.stat(psql_ftp_path)
-                    else:
-                        await set_psql_enddate(pool, psql_ftp_path)
-                        break
-                    if info['modify'] != psql_modify:
-                        await set_psql_enddate(pool, psql_ftp_path)
-                    break
-            except ConnectionResetError:
-                logger.exception(ConnectionResetError)
-            finally:
-                if client:
-                    logger.info('Высвобождаем коннектор')
-                    client.close()
 
 
 async def exist_on_ftp2(pool: Pool, links: list, psql_ftp_path: str, psql_modify: str, semaphore):
@@ -274,21 +155,18 @@ async def main(pool: Pool):
     ]
     await asyncio.gather(*tasks)
 
-    # logger.info(links)
     logger.info('Проверяем наличие этих путей на фтп. Если их нет, ставим дату окончания.')
     t_start = time.monotonic()
-
     tasks = [
         asyncio.create_task(exist_on_ftp2(pool, links, psql_ftp_path, psql_modify, semaphore))
         for psql_ftp_path, psql_modify in psql_list
     ]
     await asyncio.gather(*tasks)
-    logger.info(f'Времени на проставление даты окончания ушло: {time.monotonic() - t_start}')
+    logger.info(f'Время на проставление даты окончания : {time.monotonic() - t_start}')
 
-    logger.info(f'всего файлов для скачивания {len([link for link in links if link[-1] == 1])}')
-
+    logger.info(f'Всего файлов для скачивания {len([link for link in links if link[-1] == 1])}')
     logger.info('Скачиваем файлы с фтп ЕИС в темп')
-    limit_param = 5
+    t_start = time.monotonic()
     n, k = divmod(len(links), limit_param)
     new_arr = []
     for i in range(n):
@@ -300,7 +178,7 @@ async def main(pool: Pool):
             asyncio.create_task(get_data(pool, file, ftp_path, modify, semaphore)) for file, ftp_path, modify, flag in temp if flag == 1
         ]
         await asyncio.gather(*tasks)
-    logger.info('Новые пути к файлам добавлены в базу')
+    logger.info(f'Новые пути к файлам добавлены в базу за {time.monotonic() - t_start} секунд')
 
 
 # if __name__ == '__main__':

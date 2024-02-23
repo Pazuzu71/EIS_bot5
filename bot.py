@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import re
 import os
 import zipfile
@@ -10,56 +9,20 @@ from datetime import datetime
 import asyncpg
 from asyncpg.pool import Pool
 import aioftp
-import pytz
 from aiogram import Bot, Dispatcher
 from aiogram import F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import Message, CallbackQuery, FSInputFile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 
+from log.funcs import create_logger
 from config import TOKEN, credentials, host, port, login, password
 from app import main
+from keyboards.funcs import kb_creator
 
 
-# Настраиваем базовую конфигурацию логирования
-logging.basicConfig(
-    format='[%(asctime)s] #%(levelname)-8s %(filename)s: %(lineno)d - %(name)s:%(funcName)s - %(message)s',
-    level=logging.INFO,
-)
-# Инициализируем логгер модуля
-logger = logging.getLogger(__name__)
-# Устанавливаем логгеру уровень `DEBUG`
-logger.setLevel(logging.DEBUG)
-# Инициализируем хэндлер, который будет писать логи в файл `error.log`
-error_file = logging.FileHandler('error.log', 'a', encoding='utf-8')
-# Устанавливаем хэндлеру уровень `DEBUG`
-error_file.setLevel(logging.DEBUG)
-# Инициализируем форматтер
-formatter_1 = logging.Formatter(
-    fmt='[%(asctime)s] #%(levelname)-8s %(filename)s:'
-        '%(lineno)d - %(name)s:%(funcName)s - %(message)s'
-)
-# Определяем форматирование логов в хэндлере
-error_file.setFormatter(formatter_1)
-# Добавляем хэндлер в логгер
-logger.addHandler(error_file)
-
-
-def kb_creator(documents):
-    documents = sorted([
-        (eispublicationdate.astimezone(tz=pytz.timezone('Europe/Moscow')), xml_id)
-        for eispublicationdate, xml_id, xmlname in documents
-    ], reverse=True)
-    print(documents)
-    buttons = [
-        InlineKeyboardButton(text=document[0].strftime('%Y-%m-%d %H:%M'),
-                             callback_data=f'document_{document[1]}') for document in documents
-    ]
-    kb_builder = InlineKeyboardBuilder()
-    kb_builder.row(width=3, *buttons)
-    return kb_builder.as_markup()
+logger = create_logger(__name__)
 
 
 async def get_psql_data(pool: Pool, id_: int):
@@ -154,7 +117,6 @@ async def start_bot():
     @dp.message(lambda msg: re.fullmatch(r'\d{19}', msg.text))
     async def get_over_here(msg: Message):
         logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 19 цифр: {msg.text}')
-        # async with asyncpg.create_pool(**credentials) as pool:
         documents = await find_psql_document_id(pool, msg.text)
         if not documents:
             await msg.reply(f'В базе нет информации по плану-графику с реестровым номером {msg.text}')
@@ -191,7 +153,6 @@ async def start_bot():
     @dp.message(lambda msg: re.fullmatch(r'\d{18}', msg.text))
     async def get_over_here(msg: Message):
         logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 18 цифр: {msg.text}')
-        # async with asyncpg.create_pool(**credentials) as pool:
         documents = await find_psql_document_id(pool, msg.text)
         if not documents:
             await msg.reply(f'В базе нет информации по плану-графику с реестровым номером {msg.text}')
@@ -217,7 +178,6 @@ async def start_bot():
     async def get_document(callback: CallbackQuery):
         id_ = callback.data.split('_')[-1]
         await callback.answer(text=f'id файла в базе {id_}')
-        # async with asyncpg.create_pool(**credentials) as pool:
         ftp_path, xmlname = await get_psql_data(pool, int(id_))
         await queue.put((callback.from_user.id, callback.message.message_id, ftp_path, xmlname))
 
