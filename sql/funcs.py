@@ -123,3 +123,46 @@ async def set_psql_enddate(pool: Pool, ftp_path: str):
         await pool.release(conn)
 
 
+async def get_psql_data(pool: Pool, xml_id: int):
+    """Функция, которая по id получает расположение архива на фтп и имя файла из этого архива"""
+
+    conn: Connection = await pool.acquire()
+    try:
+        result = await conn.fetchrow(
+            """
+            SELECT zip.ftp_path, xml.xmlname
+            FROM zip 
+            INNER JOIN xml on zip.zip_id = xml.zip_id 
+            WHERE xml.xml_id = $1;
+            """,
+            xml_id
+        )
+        await pool.release(conn)
+        return result
+
+    except Exception as e:
+        print(f"An error occurred: {e}", Exception)
+    finally:
+        await pool.release(conn)
+
+
+async def find_psql_document_id(pool: Pool, eisdocno: str):
+    """Функция по номеру документа получает список из базы всех таких документов"""
+
+    conn: Connection = await pool.acquire()
+    try:
+        result = await conn.fetch(
+            """
+            SELECT eispublicationdate, xml_id, xmlname
+            FROM zip 
+            INNER JOIN xml on zip.zip_id = xml.zip_id 
+            WHERE zip.enddate IS NULL AND xml.eisdocno = $1;
+            """,
+            eisdocno
+        )
+        await pool.release(conn)
+        return result
+    except Exception as e:
+        print(f"An error occurred: {e}", Exception)
+    finally:
+        await pool.release(conn)
