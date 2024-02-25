@@ -52,6 +52,7 @@ async def worker(queue: asyncio.Queue, bot: Bot):
                 finally:
                     if client:
                         client.close()
+        time.sleep(1)
 
 
 async def start_bot():
