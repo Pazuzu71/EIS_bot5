@@ -28,9 +28,7 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str, semapho
                      all([item.startswith('epNotification'), not item.startswith('epNotificationCancel')]),
                      item.startswith('tenderPlan2020_'),
                      item.startswith('epProtocol'),
-                     # all([item.startswith('epProtocol'), not item.startswith('epProtocolCancel'), not item.startswith('epProtocolDeviation')]),
                      item.startswith('cpContractSign')]):
-                # print(f'Extract {item} from {file}')
                 z.extract(item, 'Temp')
                 with open(f'Temp//{item}') as f:
                     src = f.read()
@@ -76,11 +74,11 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str, semapho
 
                 os.unlink(f'Temp//{item}')
     os.unlink(f'Temp//{file}')
-    # async with semaphore:
-    await insert_psql_zip(pool, ftp_path, modify)
-    if event_data:
-        for row in event_data:
-            await insert_psql_xml(pool, row)
+    async with semaphore:
+        await insert_psql_zip(pool, ftp_path, modify)
+        if event_data:
+            for row in event_data:
+                await insert_psql_xml(pool, row)
 
 
 async def get_data(pool: Pool, file: str, ftp_path: str, modify: str, semaphore):
@@ -88,16 +86,12 @@ async def get_data(pool: Pool, file: str, ftp_path: str, modify: str, semaphore)
         while True:
             try:
                 async with aioftp.Client().context(host, port, login, password) as client:
-                    # print(f"Downloading file {file}...")
                     await client.download(ftp_path, f"Temp/{file}", write_into=True)
-                    # print(f"Finished downloading file {file} into Temp/{file}")
                 break
             except ConnectionResetError:
                 time.sleep(1)
-                # print(f'Алярм!!! {file}', os.path.exists(f"Temp/{file}"))
                 if os.path.exists(f"Temp/{file}"):
                     os.unlink(f"Temp/{file}")
-                # print(f'ConnectionResetError при получении {file} с фтп')
         await insert_data(pool, file, ftp_path, modify, semaphore)
 
 
@@ -128,8 +122,7 @@ async def get_ftp_list(pool: Pool, links: list, folder: str, semaphore):
 
 
 async def exist_on_ftp2(pool: Pool, links: list, psql_ftp_path: str, psql_modify: str, semaphore):
-    if all([(psql_ftp_path.split('/')[-1], psql_ftp_path, psql_modify, 0) not in links]):
-        # logger.info((psql_ftp_path.split('/')[-1], psql_ftp_path, psql_modify,))
+    if (psql_ftp_path.split('/')[-1], psql_ftp_path, psql_modify, 0) not in links:
         logger.info(f'Путь {psql_ftp_path} с датой модификации {psql_modify} не найден.')
         async with semaphore:
             await set_psql_enddate(pool, psql_ftp_path)
@@ -139,6 +132,7 @@ async def main(pool: Pool):
 
     if not os.path.exists('Temp'):
         os.mkdir('Temp')
+        logger.info('Папка Temp создана.')
 
     semaphore = asyncio.Semaphore(semaphore_value)
 
@@ -179,10 +173,3 @@ async def main(pool: Pool):
         ]
         await asyncio.gather(*tasks)
     logger.info(f'Новые пути к файлам добавлены в базу за {time.monotonic() - t_start} секунд')
-
-
-# if __name__ == '__main__':
-#     try:
-#         asyncio.run(main(pool))
-#     except (KeyboardInterrupt, SystemExit):
-#         pass
