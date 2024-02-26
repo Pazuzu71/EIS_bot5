@@ -147,16 +147,16 @@ async def get_psql_data(pool: Pool, xml_id: int):
 
 
 async def find_psql_document_id(pool: Pool, eisdocno: str):
-    """Функция по номеру документа получает список из базы всех таких документов"""
+    """Функция по реестровому номеру документа получает список из базы всех таких документов"""
 
     conn: Connection = await pool.acquire()
     try:
         result = await conn.fetch(
             """
-            SELECT eispublicationdate, xml_id, xmlname
+            SELECT eispublicationdate, max(xml_id), xmlname
             FROM zip 
             INNER JOIN xml on zip.zip_id = xml.zip_id 
-            WHERE zip.enddate IS NULL AND xml.eisdocno = $1;
+            WHERE zip.enddate IS NULL AND xml.eisdocno = $1 group by eispublicationdate, xmlname;
             """,
             eisdocno
         )
