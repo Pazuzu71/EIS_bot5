@@ -1,9 +1,9 @@
 from aiogram.types import Message
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram import Router
 
 
-from log.funcs import create_logger
+from log.main_logger import create_logger
 
 
 logger = create_logger(__name__)
@@ -15,6 +15,13 @@ router: Router = Router()
 async def start(msg: Message):
     logger.info('это старт хэндлер')
     await msg.answer('это эхо')
+
+
+@router.message(Command('help'))
+async def start(msg: Message):
+    logger.info('это запрос справки по работе бота')
+    await msg.answer('Для поиска файла нужно ввести его реестровый номер в ЕИС. '
+                     'Если файл будет найден, появится выбор даты публикации в ЕИС.')
 
 
 @router.message()

@@ -8,8 +8,8 @@ from aiogram import F
 from asyncpg.pool import Pool
 
 
-from log.funcs import create_logger
-from keyboards.funcs import kb_creator
+from log.main_logger import create_logger
+from keyboards.eis_publication_dates_kb import kb_creator
 from sql.funcs import find_psql_document_id, get_psql_data
 
 
@@ -18,7 +18,7 @@ logger = create_logger(__name__)
 router: Router = Router()
 
 
-@router.message(lambda msg: re.fullmatch(r'\d{19}', msg.text))
+@router.message(lambda msg: re.fullmatch(r'\d{19}', msg.text.strip()))
 async def get_over_here(msg: Message, pool: Pool):
     logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 19 цифр: {msg.text}')
     documents = await find_psql_document_id(pool, msg.text)
@@ -55,7 +55,7 @@ async def get_over_here(msg: Message, pool: Pool):
             await msg.reply(text=f'Сведения об исполнении (СоИ): {msg.text}', reply_markup=kb)
 
 
-@router.message(lambda msg: re.fullmatch(r'\d{18}', msg.text))
+@router.message(lambda msg: re.fullmatch(r'\d{18}', msg.text.strip()))
 async def get_over_here(msg: Message, pool: Pool):
     logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 18 цифр: {msg.text}')
     documents = await find_psql_document_id(pool, msg.text)
@@ -66,7 +66,7 @@ async def get_over_here(msg: Message, pool: Pool):
         await msg.reply(text=msg.text, reply_markup=kb)
 
 
-@router.message(lambda msg: re.fullmatch(r'\d{23}', msg.text))
+@router.message(lambda msg: re.fullmatch(r'\d{23}', msg.text.strip()))
 async def get_over_here(msg: Message, pool: Pool, queue: Queue):
     logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 19 цифр: {msg.text}')
     documents = await find_psql_document_id(pool, msg.text)

@@ -1,1 +1,1 @@
-from log import funcs
+from log import main_logger

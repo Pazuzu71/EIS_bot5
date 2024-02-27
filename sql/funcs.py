@@ -5,7 +5,7 @@ from asyncpg.pool import Pool
 from asyncpg.connection import Connection
 
 
-from log.funcs import create_logger
+from log.main_logger import create_logger
 
 
 logger = create_logger(__name__)

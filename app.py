@@ -10,7 +10,7 @@ import aioftp
 from asyncpg.pool import Pool
 
 
-from log.funcs import create_logger
+from log.main_logger import create_logger
 from config import semaphore_value, host, port, login, password, folders, limit_param
 from sql.funcs import create_psql_tables, insert_psql_zip, insert_psql_xml, get_psql_paths, set_psql_enddate
 from sql.funcs import exist_in_psql_db

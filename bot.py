@@ -12,10 +12,11 @@ from aiogram.types import FSInputFile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 
-from log.funcs import create_logger
+from log.main_logger import create_logger
 from config import TOKEN, credentials, host, port, login, password
 from app import main
 from handlers import users, others
+from keyboards.main_menu import set_main_menu
 
 
 logger = create_logger(__name__)
@@ -65,6 +66,9 @@ async def start_bot():
 
     bot = Bot(token=TOKEN)
     dp = Dispatcher(pool=pool, queue=queue)
+
+    # создаем главное меню
+    await set_main_menu(bot)
 
     # подключаем роутеры
     dp.include_router(users.router)
