@@ -23,7 +23,7 @@ async def get_over_here(msg: Message, pool: Pool):
     logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 19 цифр: {msg.text}')
     documents = await find_psql_document_id(pool, msg.text)
     if not documents:
-        await msg.reply(f'В базе нет информации по плану-графику с реестровым номером {msg.text}')
+        await msg.reply(f'В базе нет информации по документу с реестровым номером {msg.text}')
     else:
         notifications, protocols, contracts, contract_procedures = [], [], [], []
         for document in documents:
@@ -60,7 +60,7 @@ async def get_over_here(msg: Message, pool: Pool):
     logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 18 цифр: {msg.text}')
     documents = await find_psql_document_id(pool, msg.text)
     if not documents:
-        await msg.reply(f'В базе нет информации по плану-графику с реестровым номером {msg.text}')
+        await msg.reply(f'В базе нет информации по документу с реестровым номером {msg.text}')
     else:
         kb = kb_creator(documents)
         await msg.reply(text=msg.text, reply_markup=kb)
@@ -71,7 +71,7 @@ async def get_over_here(msg: Message, pool: Pool, queue: Queue):
     logger.info(f'Перехвачено хэнлером, определяющим номер ЕИС 19 цифр: {msg.text}')
     documents = await find_psql_document_id(pool, msg.text)
     if not documents:
-        await msg.reply(f'В базе нет информации по проекту контракта с реестровым номером {msg.text}')
+        await msg.reply(f'В базе нет информации по документу с реестровым номером {msg.text}')
     if len(documents) == 1:
         xml_id = documents[0][1]
         ftp_path, xmlname = await get_psql_data(pool, int(xml_id))
