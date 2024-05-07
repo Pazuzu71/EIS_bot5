@@ -33,6 +33,8 @@ async def get_over_here(msg: Message, pool: Pool):
                     notifications.append(document)
                 case s if s.startswith('epProtocol'):
                     protocols.append(document)
+                case s if s.startswith('epNoticeApplicationsAbsence_'):
+                    protocols.append(document)
                 case s if s.startswith('contract_'):
                     contracts.append(document)
                 case s if s.startswith('contractProcedure_'):

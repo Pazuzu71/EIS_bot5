@@ -39,7 +39,7 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str, semapho
                         except Exception as e:
                             logger.exception(item, e)
                             continue
-                    if any([item.startswith('epNotification'), item.startswith('epProtocol')]):
+                    if any([item.startswith('epNotification'), item.startswith('epProtocol'), item.startswith('epNoticeApplicationsAbsence_')]):
                         try:
                             eisdocno = re.search(r'(?<=<ns9:purchaseNumber>)\d{19}(?=</ns9:purchaseNumber>)', src)[0]
                             eispublicationdate = re.search(r'(?<=<ns9:publishDTInEIS>).+(?=</ns9:publishDTInEIS>)', src)[0]
