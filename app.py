@@ -27,7 +27,7 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str, semapho
                     [item.startswith('contractProcedure_'), item.startswith('contract_'),
                      all([item.startswith('epNotification'), not item.startswith('epNotificationCancel')]),
                      item.startswith('tenderPlan2020_'),
-                     item.startswith('epProtocol'),
+                     any([item.startswith('epProtocol'), item.startswith('epNoticeApplicationsAbsence_')]),
                      item.startswith('cpContractSign')]):
                 z.extract(item, 'Temp')
                 with open(f'Temp//{item}') as f:
