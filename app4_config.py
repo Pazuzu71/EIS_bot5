@@ -1,0 +1,3 @@
+subsystemType = "RGK"  # PRIZ,PRIZP,RPEC,RPGZ,RGK,UR
+exactDate = "2024-07-24"
+regNum = "03662000256" # 03662000256 03662000020
