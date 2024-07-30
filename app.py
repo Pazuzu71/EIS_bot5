@@ -173,3 +173,4 @@ async def main(pool: Pool):
         ]
         await asyncio.gather(*tasks)
     logger.info(f'Новые пути к файлам добавлены в базу за {time.monotonic() - t_start} секунд')
+
