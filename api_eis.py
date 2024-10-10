@@ -130,25 +130,26 @@ async def main():
 
     semaphore = asyncio.Semaphore(5)
 
-    tasks = [asyncio.create_task(get_response(subsystemType, exactDate, regNum, semaphore)) for regNum in regNums]
-    archiveUrls_all = await asyncio.gather(*tasks)
-    urls = []
-    for archiveUrls in archiveUrls_all:
-        if archiveUrls[-1] and len(archiveUrls[-1]) > 1:
-            print(archiveUrls[0], 'Несколько архивов')
-            i = 0
-            for url in archiveUrls[-1]:
-                urls.append((f'{archiveUrls[0]}_{i}', url))
-                i += 1
-        elif archiveUrls[-1] and len(archiveUrls[-1]) == 1:
-            urls.append((archiveUrls[0], archiveUrls[-1][0]))
+    for subsystemType in subsystemTypes.split(','):
+        tasks = [asyncio.create_task(get_response(subsystemType, exactDate, regNum, semaphore)) for regNum in regNums]
+        archiveUrls_all = await asyncio.gather(*tasks)
+        urls = []
+        for archiveUrls in archiveUrls_all:
+            if archiveUrls[-1] and len(archiveUrls[-1]) > 1:
+                print(archiveUrls[0], 'Несколько архивов')
+                i = 0
+                for url in archiveUrls[-1]:
+                    urls.append((f'{archiveUrls[0]}_{i}', url))
+                    i += 1
+            elif archiveUrls[-1] and len(archiveUrls[-1]) == 1:
+                urls.append((archiveUrls[0], archiveUrls[-1][0]))
 
-    # archiveUrls_all = [archiveUrl for archiveUrl in archiveUrls_all if archiveUrl[-1]]
-    # print(archiveUrls_all)
-    # print(urls)
+        # archiveUrls_all = [archiveUrl for archiveUrl in archiveUrls_all if archiveUrl[-1]]
+        # print(archiveUrls_all)
+        # print(urls)
 
-    tasks = [asyncio.create_task(get_file(regNum_, archiveUrl, semaphore)) for regNum_, archiveUrl in urls]
-    await asyncio.gather(*tasks)
+        tasks = [asyncio.create_task(get_file(regNum_, archiveUrl, semaphore)) for regNum_, archiveUrl in urls]
+        await asyncio.gather(*tasks)
 
 
 if __name__ == '__main__':

@@ -53,6 +53,12 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str, semapho
                         except Exception as e:
                             logger.exception(item, e)
                             continue
+                        try:
+                            eisdocno = re.search(r'(?<=<ns6:planNumber>)\d{18}(?=</ns6:planNumber>)', src)[0]
+                            eispublicationdate = re.search(r'(?<=<ns6:publishDate>).+(?=</ns6:publishDate>)', src)[0]
+                        except Exception as e:
+                            logger.exception(item, e)
+                            continue
                     if item.startswith('cpContractSign'):
                         try:
                             common_info = re.search(r'(?<=<ns\d:commonInfo>).+(?=</ns\d:commonInfo>)', src, flags=re.DOTALL)[0]
