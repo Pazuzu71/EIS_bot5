@@ -38,27 +38,27 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str, semapho
                             eispublicationdate = re.search(r'(?<=<publishDate>).+(?=</publishDate>)', src)[0]
                         except Exception as e:
                             logger.exception(item, e)
-                            continue
+
                     if any([item.startswith('epNotification'), item.startswith('epProtocol'), item.startswith('epNoticeApplicationsAbsence_')]):
                         try:
                             eisdocno = re.search(r'(?<=<ns9:purchaseNumber>)\d{19}(?=</ns9:purchaseNumber>)', src)[0]
                             eispublicationdate = re.search(r'(?<=<ns9:publishDTInEIS>).+(?=</ns9:publishDTInEIS>)', src)[0]
                         except Exception as e:
                             logger.exception(item, e)
-                            continue
+
                     if item.startswith('tenderPlan2020'):
                         try:
                             eisdocno = re.search(r'(?<=<ns5:planNumber>)\d{18}(?=</ns5:planNumber>)', src)[0]
                             eispublicationdate = re.search(r'(?<=<ns5:publishDate>).+(?=</ns5:publishDate>)', src)[0]
                         except Exception as e:
                             logger.exception(item, e)
-                            continue
+
                         try:
                             eisdocno = re.search(r'(?<=<ns6:planNumber>)\d{18}(?=</ns6:planNumber>)', src)[0]
                             eispublicationdate = re.search(r'(?<=<ns6:publishDate>).+(?=</ns6:publishDate>)', src)[0]
                         except Exception as e:
                             logger.exception(item, e)
-                            continue
+
                     if item.startswith('cpContractSign'):
                         try:
                             common_info = re.search(r'(?<=<ns\d:commonInfo>).+(?=</ns\d:commonInfo>)', src, flags=re.DOTALL)[0]
@@ -66,7 +66,7 @@ async def insert_data(pool: Pool, file: str, ftp_path: str, modify: str, semapho
                             eispublicationdate = re.search(r'(?<=<ns\d:publishDTInEIS>).+(?=</ns\d:publishDTInEIS>)', common_info)[0]
                         except Exception as e:
                             logger.exception(item, e)
-                            continue
+
                     try:
                         event_data.append({
                             'ftp_path': ftp_path,
